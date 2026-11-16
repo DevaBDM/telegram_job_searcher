@@ -4,14 +4,15 @@ Rules
 -----
 * A plain keyword is a substring match:  ``python`` matches "Python developer".
 * Prefix a keyword with ``re:`` to use a regular expression: ``re:\\bsenior\\b``
-* ``keywords``      -> at least ONE must match (OR).
-* ``must_include``  -> ALL of them must match (AND).
-* ``exclude``       -> if ANY matches, the message is dropped.
+* ``priority_keywords`` -> if ANY matches, the post matches immediately and
+  ignores ``exclude`` rules!
+* ``keywords``          -> at least ONE must match (OR), but subject to ``exclude``.
+* ``must_include``      -> ALL of them must match (AND).
+* ``exclude``           -> if ANY matches (and no priority keyword matched), the
+  message is dropped.
 * ``fuzzy`` / ``fuzzy_threshold`` -> plain keywords also match by approximate
   string matching (rapidfuzz partial_ratio), so misspellings like "pythn"
   still match "python" when the score is above the threshold.
-
-Exclusion is checked first, so a post is rejected as cheaply as possible.
 """
 
 from __future__ import annotations
@@ -68,6 +69,7 @@ class KeywordMatcher:
         self.whole_word = config.whole_word
         self.fuzzy_enabled = config.fuzzy
         self.fuzzy_threshold = config.fuzzy_threshold
+        self._priority_keywords = _compile_all(config.priority_keywords, config.whole_word, flags)
         self._keywords = _compile_all(config.keywords, config.whole_word, flags)
         self._must_include = _compile_all(config.must_include, config.whole_word, flags)
         self._exclude = _compile_all(config.exclude, config.whole_word, flags)
@@ -82,30 +84,43 @@ class KeywordMatcher:
                 ) from exc
             self._fuzzy = _fuzz_mod
 
+    def _find_matches(self, patterns: List[Tuple[str, Pattern[str]]], text: str, lower_text: str) -> List[str]:
+        hits: List[str] = []
+        for raw, pattern in patterns:
+            if pattern.search(text):
+                hits.append(raw)
+            elif self.fuzzy_enabled and self._fuzzy is not None:
+                score = self._fuzzy.partial_ratio(raw.lower(), lower_text)
+                if score >= self.fuzzy_threshold:
+                    hits.append(raw)
+        return hits
+
     def match(self, text: str | None) -> MatchResult:
         if not text or not text.strip():
             return MatchResult(False)
 
-        for raw, pattern in self._exclude:
-            if pattern.search(text):
-                return MatchResult(False, excluded_by=raw)
+        lower_text = text.lower() if self.fuzzy_enabled else ""
 
+        # 1. Check must_include (AND requirements apply to all matches)
         for raw, pattern in self._must_include:
             if not pattern.search(text):
                 return MatchResult(False, excluded_by=f"missing:{raw}")
 
-        hits: List[str] = []
-        lower_text = text.lower() if self.fuzzy_enabled else ""
-        for raw, pattern in self._keywords:
-            if pattern.search(text):
-                hits.append(raw)
-            elif self.fuzzy_enabled and self._fuzzy is not None:
-                # Approximate match for misspellings (e.g. "pythn" ~ "python").
-                score = self._fuzzy.partial_ratio(raw.lower(), lower_text)
-                if score >= self.fuzzy_threshold:
-                    hits.append(raw)
+        # 2. Check priority keywords: if any match, ignore excludes!
+        priority_hits = self._find_matches(self._priority_keywords, text, lower_text)
+        if priority_hits:
+            # Also collect any regular keyword matches that also appear
+            normal_hits = self._find_matches(self._keywords, text, lower_text)
+            return MatchResult(True, keywords=tuple(priority_hits + normal_hits))
 
-        if not hits:
+        # 3. If no priority keywords matched, check exclude list
+        for raw, pattern in self._exclude:
+            if pattern.search(text):
+                return MatchResult(False, excluded_by=raw)
+
+        # 4. Check regular keywords
+        normal_hits = self._find_matches(self._keywords, text, lower_text)
+        if not normal_hits:
             return MatchResult(False)
 
-        return MatchResult(True, keywords=tuple(hits))
+        return MatchResult(True, keywords=tuple(normal_hits))

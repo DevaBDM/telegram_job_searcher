@@ -254,6 +254,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--keywords", nargs="*", metavar="ACTION|WORD", default=None,
         help="filters.keywords: 'list' (default) | add WORD... | set WORD... | remove WORD...",
     )
+    lists.add_argument(
+        "--priority-keywords", nargs="*", metavar="ACTION|WORD", default=None,
+        help="filters.priority_keywords: 'list' (default) | add WORD... | set WORD... | remove WORD...",
+    )
 
     parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
     return parser
@@ -381,6 +385,9 @@ def cmd_manage_lists(config_path: str, args: argparse.Namespace) -> bool:
     if args.keywords is not None:
         action, items = _parse_list_action(args.keywords, "keywords")
         jobs.append(("keywords", "filters", action, items))
+    if args.priority_keywords is not None:
+        action, items = _parse_list_action(args.priority_keywords, "priority-keywords")
+        jobs.append(("priority_keywords", "filters", action, items))
 
     changed = False
     for key, section, action, items in jobs:
@@ -408,7 +415,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # --sources / --keywords edit config.yaml directly, so they run before the
     # file is validated (you may be building the lists from an empty state).
-    if args.sources is not None or args.keywords is not None:
+    if args.sources is not None or args.keywords is not None or args.priority_keywords is not None:
         try:
             cmd_manage_lists(args.config, args)
         except (ConfigError, ConfigFileError) as exc:

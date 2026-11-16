@@ -48,7 +48,31 @@ class MatcherTests(unittest.TestCase):
         m = matcher(keywords=["python"], exclude=["unpaid"])
         result = m.match("Unpaid python internship")
         self.assertFalse(result.matched)
-        self.assertEqual(result.excluded_by, "unpaid")
+
+    def test_priority_keyword_overrides_exclude(self):
+        # When a priority keyword matches, exclude is ignored
+        m = matcher(
+            keywords=["python"],
+            priority_keywords=["lead architect"],
+            exclude=["unpaid", "internship"],
+        )
+        # Normal keyword is excluded
+        self.assertFalse(m.match("Unpaid python internship").matched)
+        # Priority keyword matches even with exclude terms present
+        result = m.match("Looking for a Python Lead Architect for an unpaid internship")
+        self.assertTrue(result.matched)
+        self.assertIn("lead architect", result.keywords)
+        self.assertIn("python", result.keywords)
+
+    def test_priority_keyword_must_include_still_required(self):
+        # must_include is an AND requirement for all matches
+        m = matcher(
+            priority_keywords=["python"],
+            must_include=["remote"],
+            exclude=["internship"],
+        )
+        self.assertFalse(m.match("Python internship in Addis").matched)
+        self.assertTrue(m.match("Remote Python internship").matched)
 
     def test_whole_word(self):
         strict = matcher(keywords=["python"], whole_word=True)

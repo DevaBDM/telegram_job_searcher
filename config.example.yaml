@@ -57,6 +57,12 @@ filters:
     - 're:\b(?:remote|hybrid|onsite)\b.*\b(?:python|django|backend)\b'
     - 're:(?:\$|€|£)\s?\d{2,3}\s?(?:k|/yr)?\b'
 
+  # Keywords that NEVER get excluded by filters.exclude (highest priority).
+  # If any of these match, the post is saved even if it contains words from `exclude`.
+  priority_keywords: []
+  # - "lead architect"
+  # - "staff engineer"
+
   # ALL of these must also appear (AND logic). Leave empty to disable.
   must_include: []
   # - "ethiopia"
