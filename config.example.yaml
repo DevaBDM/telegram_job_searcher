@@ -1,0 +1,109 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  Telegram Job Saver — configuration
+#  Edit this file, then run:  python main.py --once
+# ═══════════════════════════════════════════════════════════════════════════
+
+telegram:
+  # Get these from https://my.telegram.org  →  "API development tools"
+  api_id: 0                     # TODO: your api_id (a number)
+  api_hash: "TODO"              # TODO: your api_hash (a 32-char string)
+  phone: "+251900000000"        # TODO: your phone, international format
+  session: "jobsaver"           # session file name
+  session_dir: "sessions"       # folder where the session file is stored
+
+  # Tip: you can keep secrets out of this file by using ${VARS} instead, e.g.
+  #   api_id: ${TG_API_ID}
+  # and exporting TG_API_ID / TG_API_HASH in your shell.
+
+# ───────────────────────────────────────────────────────────────────────────
+#  Channels & groups to watch
+#  Accepted forms:  "@username"    "-1001234567890"    "https://t.me/name"
+#  Run  python main.py --chats  to print the exact id of every chat you are in.
+# ───────────────────────────────────────────────────────────────────────────
+sources:
+  - "@example_jobs_channel"     # TODO: replace with your real channels
+  # - "@python_jobs"
+  # - -1001234567890
+  # - "https://t.me/some_jobs_group"
+
+filters:
+  case_sensitive: false
+  whole_word: false              # true → "python" won't match "pythonista"
+
+  # At least ONE of these must appear in the post (OR logic).
+  # Plain text = simple substring. Prefix with "re:" for a regular expression.
+  keywords:
+    - python
+    - django
+    - fastapi
+    - "backend developer"
+    - "data engineer"
+    - "full stack"
+    - 're:\b(?:senior|lead|principal)\s+(?:python|backend|data)\b'
+    - 're:\b(?:remote|hybrid|onsite)\b.*\b(?:python|django|backend)\b'
+    - 're:(?:\$|€|£)\s?\d{2,3}\s?(?:k|/yr)?\b'
+
+  # ALL of these must also appear (AND logic). Leave empty to disable.
+  must_include: []
+  # - "ethiopia"
+  # - "addis ababa"
+
+  # If ANY of these appear, the post is skipped. Leave empty to disable.
+  exclude:
+    - unpaid
+    - "commission only"
+    - internship
+    - intern
+    - 're:\b(?:no\s+salary|equity\s+only|volunteer)\b'
+    - 're:\b(?:only|must\s+be)\s+(?:male|female)\b'
+
+# ───────────────────────────────────────────────────────────────────────────
+#  Which slice of history to read
+#
+#  Precedence, highest first:
+#    1. from_date is set   → start exactly there (ignores the stored checkpoint)
+#    2. resume: true       → continue from where the previous run stopped
+#    3. neither            → only posts newer than the last one already seen
+#  Scanning always stops at `to_date` (or "now" when empty).
+#
+#  After every pass a per-chat checkpoint is saved to jobsaver.sqlite3, so a
+#  crash, Ctrl+C or reboot resumes at the exact second it stopped at
+#  (e.g. 2026-11-14 15:34:45). An explicit --from / from_date overrides it.
+#
+#  These can also be given per run on the command line:
+#    python main.py --from "2026-11-01" --to "2026-11-16 23:59" --once
+#    python main.py --from "2026-11-14 15:34:45" --mark-read --once
+# ───────────────────────────────────────────────────────────────────────────
+scan:
+  from_date: null          # e.g. "2026-11-01" or "2026-11-14 15:34:45"  (null = resume)
+  to_date: null            # e.g. "2026-11-16 23:59"                      (null = now)
+  resume: true             # continue from the stored checkpoint when from_date is null
+  timezone: "UTC"          # how dates without an offset are interpreted (IANA name)
+
+  # false → posts are read but stay UNREAD in Telegram (default)
+  # true  → every scanned chat is marked as read up to the last scanned message
+  mark_as_read: false
+
+  max_history_messages: 2000   # safety cap per chat per pass (date-window mode)
+
+saving:
+  # auto    → forward the post; if forwarding is blocked, send a text copy
+  # forward → always forward (keeps media + "Forwarded from …" header)
+  # copy    → send your own formatted message (header + text + link)
+  mode: auto
+
+  destination: "me"          # "me" = your Saved Messages
+  include_link: true         # copy mode only: append the t.me link
+  append_note: false         # forward mode: add a short "matched: …" note after each post
+  header: "🎯 {channel} · {date}"   # copy mode header; placeholders: {channel} {date} {keywords} {link}
+
+runtime:
+  poll_interval_seconds: 300     # how often to check for new posts
+  initial_scan_limit: 200        # on the first run: how many recent posts per chat to look at
+  max_messages_per_poll: 100     # max new posts handled per chat per cycle
+  max_age_days: 14               # ignore posts older than this (0 = no limit)
+  dry_run: false                 # true = print matches but save nothing
+
+storage:
+  database: "jobsaver.sqlite3"   # remembers what was already saved (no duplicates)
+  log_file: "logs/jobsaver.log"
