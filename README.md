@@ -68,6 +68,9 @@ python main.py --chats
 Copy the ones you want into `config.yaml` → `sources`. `@username` also works
 for public channels; raw `-100…` ids work for private ones.
 
+You do not have to edit the file by hand — the same lists can be managed from
+the terminal (see [Managing sources & keywords](#managing-sources--keywords-from-the-terminal)).
+
 ## 5. Write your filters
 
 ```yaml
@@ -102,6 +105,47 @@ python main.py                    # keep polling every 5 minutes
 ```
 
 Press `Ctrl+C` to stop.
+
+---
+
+## Managing sources & keywords from the terminal
+
+Both lists in `config.yaml` can be edited without opening the file. The commands
+write the file in place and **keep all of its comments**, then check the result
+still parses before saving.
+
+```bash
+python main.py --sources            # show what is watched (same as "list")
+python main.py --keywords           # show the current keywords
+```
+
+| command | effect |
+|---|---|
+| `--sources add REF…` | append channels (`@name`, `-100…`, `t.me/…`); duplicates are skipped |
+| `--sources set REF…` | replace the whole watched list |
+| `--sources remove REF…` | drop exact entries |
+| `--keywords add WORD…` | append keywords |
+| `--keywords set WORD…` | replace all keywords |
+| `--keywords remove WORD…` | drop exact keywords |
+
+```bash
+python main.py --sources add "@hahujobs" -1001212256595 "https://t.me/geezjobs_ethiopia"
+python main.py --sources set "@hahujobs" "@sabijobs" "@shegarjob"
+python main.py --sources remove "@example_jobs_channel"
+
+python main.py --keywords add "backend developer" django fastapi
+python main.py --keywords set python django "backend developer"
+python main.py --keywords remove internship
+```
+
+Notes:
+
+- Duplicates are compared case-insensitively (`@HaHuJobs` == `@hahujobs`).
+- Use quotes for anything with spaces, for regex keywords
+  (`'re:\b(?:django|fastapi)\b'`) and for `-100…` ids if your shell complains.
+- Add `--once` / `--dry-run` to the same command to scan immediately after the
+  edit: `python main.py --sources add "@hahujobs" --dry-run --once`.
+- Without a run flag the command only edits the file and exits.
 
 ---
 
@@ -241,8 +285,8 @@ python main.py --stats
 |---|---|---|
 | `telegram.api_id` / `api_hash` / `phone` | — | credentials from my.telegram.org |
 | `telegram.session_dir` | `sessions` | where the login session is stored |
-| `sources` | — | list of channels/groups (`@name`, `-100…`, `t.me/…`) |
-| `filters.keywords` | — | OR list — at least one must match |
+| `sources` | — | list of channels/groups (`@name`, `-100…`, `t.me/…`) — edit with `--sources add/set/remove` |
+| `filters.keywords` | — | OR list — at least one must match — edit with `--keywords add/set/remove` |
 | `filters.must_include` | `[]` | AND list — all must match |
 | `filters.exclude` | `[]` | any match → post skipped |
 | `filters.case_sensitive` | `false` | exact case matching |

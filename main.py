@@ -8,6 +8,14 @@ Usage
     python main.py                             # run forever, polling for new posts
     python main.py --once                      # single pass, then exit
 
+    # manage the lists in config.yaml from the terminal
+    python main.py --sources                   # show the watched channels
+    python main.py --sources add "@hahujobs" -1001212256595
+    python main.py --sources set "@hahujobs"   # replace the whole list
+    python main.py --sources remove "@old"
+    python main.py --keywords                  # show the keywords
+    python main.py --keywords add "backend developer"
+
     # scan a specific date range (overrides the stored checkpoint)
     python main.py --from "2026-11-01" --to "2026-11-16 23:59" --once
     python main.py --from "2026-11-10 08:00" --mark-read --once
@@ -29,6 +37,7 @@ from pathlib import Path
 from typing import Any
 
 from jobsaver.config import AppConfig, ConfigError, load_config, parse_when
+from jobsaver.configfile import ConfigFileError, read_list, write_list
 from jobsaver.console import configure_output, safe_print
 from jobsaver.runner import JobSaver
 from jobsaver.store import Store, from_db
@@ -185,6 +194,11 @@ def build_parser() -> argparse.ArgumentParser:
             "examples:\n"
             "  python main.py --login\n"
             "  python main.py --chats\n"
+            "  python main.py --sources add \"@hahujobs\" -1001212256595\n"
+            "  python main.py --sources set \"@hahujobs\" \"@geezjobs_ethiopia\"\n"
+            "  python main.py --sources list\n"
+            "  python main.py --keywords add \"backend developer\" django\n"
+            "  python main.py --keywords set python django fastapi\n"
             "  python main.py --from 2026-11-01 --to 2026-11-16 --once\n"
             "  python main.py --from '2026-11-14 15:34:45' --mark-read --once\n"
             "  python main.py --checkpoint\n"
@@ -223,6 +237,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="read without marking as read (default)",
     )
 
+    lists = parser.add_argument_group(
+        "manage the config lists (writes config.yaml, keeps its comments)"
+    )
+    lists.add_argument(
+        "--sources", nargs="*", metavar="ACTION|REF", default=None,
+        help="channels to watch: 'list' (default) | add REF... | set REF... | remove REF...",
+    )
+    lists.add_argument(
+        "--keywords", nargs="*", metavar="ACTION|WORD", default=None,
+        help="filters.keywords: 'list' (default) | add WORD... | set WORD... | remove WORD...",
+    )
+
     parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
     return parser
 
@@ -251,9 +277,137 @@ def apply_cli_overrides(config: AppConfig, args: argparse.Namespace) -> None:
         config.runtime.dry_run = True
 
 
+# --------------------------------------------------------------------------- #
+# Managing sources / keywords from the terminal
+# --------------------------------------------------------------------------- #
+LIST_ACTIONS = ("list", "add", "set", "remove")
+
+
+def _parse_list_action(values: list[str] | None, flag: str) -> tuple[str, list[str]]:
+    """Split ``["add", "@a", "-100…"]`` into an action and its values."""
+    items = [value.strip() for value in (values or []) if value and value.strip()]
+    if not items:
+        return "list", []
+    action = items[0].lower()
+    if action not in LIST_ACTIONS:
+        raise ConfigError(
+            f"Unknown action {items[0]!r} for --{flag}.\n"
+            f"  --{flag}                      show the current list\n"
+            f"  --{flag} add VALUE ...        append (duplicates are ignored)\n"
+            f"  --{flag} set VALUE ...        replace the whole list\n"
+            f"  --{flag} remove VALUE ...     drop an exact entry"
+        )
+    return action, items[1:]
+
+
+def _dedupe(values: list[str]) -> tuple[list[str], list[str]]:
+    """Case-insensitive dedupe that keeps the first spelling and the order."""
+    seen: set[str] = set()
+    unique: list[str] = []
+    duplicates: list[str] = []
+    for value in values:
+        key = value.strip().lower()
+        if key in seen:
+            duplicates.append(value)
+            continue
+        seen.add(key)
+        unique.append(value)
+    return unique, duplicates
+
+
+def _show_list(title: str, values: list[str]) -> None:
+    safe_print(f"{title} ({len(values)}):")
+    if not values:
+        safe_print("  (empty)")
+        return
+    width = len(str(len(values)))
+    for index, value in enumerate(values, 1):
+        safe_print(f"  {index:>{width}}. {value}")
+
+
+def apply_list_action(
+    current: list[str], action: str, items: list[str], title: str
+) -> list[str]:
+    """Return the new list for one action, printing what happened."""
+    if action == "list":
+        return current
+
+    if action == "set":
+        if not items:
+            raise ConfigError("'set' needs at least one value.")
+        new_values, duplicates = _dedupe(items)
+        for value in duplicates:
+            safe_print(f"  ! duplicate ignored: {value}")
+        safe_print(f"{title}: replaced {len(current)} → {len(new_values)}.")
+        return new_values
+
+    if action == "add":
+        if not items:
+            raise ConfigError("'add' needs at least one value.")
+        merged, duplicates = _dedupe(current + items)
+        for value in duplicates:
+            safe_print(f"  ! already there, skipped: {value}")
+        added = len(merged) - len(current)
+        safe_print(f"{title}: added {added} (now {len(merged)}).")
+        return merged
+
+    # remove
+    if not items:
+        raise ConfigError("'remove' needs at least one value.")
+    wanted = {value.lower() for value in items}
+    existing = {value.lower() for value in current}
+    for value in items:
+        if value.lower() not in existing:
+            safe_print(f"  ! not in the list, ignored: {value}")
+    kept = [value for value in current if value.lower() not in wanted]
+    safe_print(f"{title}: removed {len(current) - len(kept)} (now {len(kept)}).")
+    return kept
+
+
+def cmd_manage_lists(config_path: str, args: argparse.Namespace) -> bool:
+    """Apply --sources / --keywords actions. Returns True if anything changed."""
+    jobs = []
+    if args.sources is not None:
+        action, items = _parse_list_action(args.sources, "sources")
+        jobs.append(("sources", None, action, items))
+    if args.keywords is not None:
+        action, items = _parse_list_action(args.keywords, "keywords")
+        jobs.append(("keywords", "filters", action, items))
+
+    changed = False
+    for key, section, action, items in jobs:
+        if action == "list":
+            _show_list(f"{key.capitalize()} in {config_path}", read_list(config_path, key, section))
+            continue
+
+        current = read_list(config_path, key, section)
+        updated = apply_list_action(current, action, items, key.capitalize())
+        if updated != current:
+            write_list(config_path, key, updated, section)
+            changed = True
+        _show_list(f"{key.capitalize()} in {config_path}", updated)
+
+    if changed:
+        safe_print("")
+        safe_print(f"Saved to {Path(config_path).resolve()}")
+    return changed
+
+
+
 def main(argv: list[str] | None = None) -> int:
     configure_output()
     args = build_parser().parse_args(argv)
+
+    # --sources / --keywords edit config.yaml directly, so they run before the
+    # file is validated (you may be building the lists from an empty state).
+    if args.sources is not None or args.keywords is not None:
+        try:
+            cmd_manage_lists(args.config, args)
+        except (ConfigError, ConfigFileError) as exc:
+            print(f"Configuration error:\n{exc}", file=sys.stderr)
+            return 2
+        if not any((args.once, args.dry_run, args.stats, args.checkpoint, args.chats)):
+            return 0
 
     try:
         config = load_config(args.config)

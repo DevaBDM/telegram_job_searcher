@@ -19,6 +19,11 @@ telegram:
 #  Channels & groups to watch
 #  Accepted forms:  "@username"    "-1001234567890"    "https://t.me/name"
 #  Run  python main.py --chats  to print the exact id of every chat you are in.
+#  Or manage this list from the terminal:
+#    python main.py --sources add "@name" -1001234567890
+#    python main.py --sources set "@name"      (replace the whole list)
+#    python main.py --sources remove "@name"
+#    python main.py --sources                  (show the current list)
 # ───────────────────────────────────────────────────────────────────────────
 sources:
   - "@example_jobs_channel"     # TODO: replace with your real channels
@@ -32,6 +37,8 @@ filters:
 
   # At least ONE of these must appear in the post (OR logic).
   # Plain text = simple substring. Prefix with "re:" for a regular expression.
+  # Manage from the terminal:  python main.py --keywords add "backend developer"
+  #                            python main.py --keywords set python django
   keywords:
     - python
     - django
