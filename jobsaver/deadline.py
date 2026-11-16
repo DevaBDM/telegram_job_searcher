@@ -5,8 +5,17 @@ Scans for common phrases like "Deadline: Nov 20, 2026", "Apply before 20/11/2026
 or ``None`` when no deadline can be found (which is perfectly fine — many posts
 simply don't state one).
 
+Two matching strategies:
+
+1. **Regex** — a compiled alternation of all known trigger phrases.  Fast and
+   precise; handles the correctly-spelled and common-misspelling cases.
+2. **Fuzzy** — when ``rapidfuzz`` is installed, every line of the post is
+   checked against the trigger phrases with ``partial_ratio``.  This catches
+   typos like "Deadlin", "Closin Date", "Aply Before", etc.  The threshold
+   defaults to 70 (same as the keyword matcher).
+
 Only plain-text heuristics — no LLM calls, no network.  False positives are
-preferable to crashing: if the regex fires on something that isn't really a
+preferable to crashing: if a heuristic fires on something that isn't really a
 deadline, the worst case is a wrong date in one column.
 """
 
@@ -14,7 +23,7 @@ from __future__ import annotations
 
 import re
 from datetime import date, datetime, timedelta
-from typing import Optional
+from typing import Any, List, Optional
 
 # ── month names (English + a few Amharic transliterations) ────────────────
 _MONTHS: dict[str, int] = {}
@@ -31,25 +40,71 @@ for _name, _num in _EN_MONTHS:
 _ORDINAL = re.compile(r"(\d{1,2})\s*(?:st|nd|rd|th)\b", re.IGNORECASE)
 
 # ── trigger phrases ───────────────────────────────────────────────────────
-# A trigger is a keyword/phrase that usually precedes a date meaning "deadline".
+# Canonical forms used for both regex building and fuzzy matching.
+DEADLINE_KEYWORDS: List[str] = [
+    "Application Close",
+    "Application Closed",
+    "Application Closes",
+    "Apply Before",
+    "Apply By",
+    "Apply No Later Than",
+    "Apply Until",
+    "Close Date",
+    "Closing Date",
+    "Closing On",
+    "Cut-Off Date",
+    "Cutoff Date",
+    "Deadline",
+    "Due Date",
+    "End Date",
+    "Expiration Date",
+    "Expires",
+    "Final Date",
+    "Last Date",
+    "Last Day To Apply",
+    "No Later Than",
+    "Open Until",
+    "Submit Before",
+    "Submit By",
+    "Valid Until",
+    # Amharic
+    "ቀነ ገደብ",
+    "የማመልከቻ ቀን",
+    "የመጨረሻ ቀን",
+]
+
+# Build the regex alternation from the canonical list.  Multi-word phrases
+# have their spaces relaxed to ``\s+``, and hyphens become ``[\s\-]?``.
+def _phrase_to_pattern(phrase: str) -> str:
+    """Turn a human-readable phrase into a regex fragment."""
+    # Escape regex-special chars except space and hyphen (handled below)
+    escaped = re.escape(phrase).replace(r"\ ", " ").replace(r"\-", "-")
+    # Relax whitespace and hyphens
+    escaped = re.sub(r"[\s]+", r"\\s+", escaped)
+    escaped = escaped.replace("-", r"[\\s\\-]?")
+    return escaped
+
 _TRIGGER = (
-    r"(?:"
-    r"deadline|dead[\s\-]?line"
-    r"|closing\s+date|close\s+date"
-    r"|due\s+date"
-    r"|last\s+(?:date|day)\s+(?:to|of|for)\s+appl(?:y|ication)"
-    r"|apply\s+(?:before|by|until|on\s+or\s+before)"
-    r"|application\s+(?:deadline|closes?|due|end)"
-    r"|submit\s+(?:before|by|until)"
-    r"|submission\s+(?:deadline|due|date|closes?)"
-    r"|expires?\s+(?:on|at|by|date)?"
-    r"|expiry\s+date"
-    r"|valid\s+(?:until|through|till)"
-    r"|(?:not?\s+)?later\s+than"
-    r"|end\s+date"
-    r"|ቀነ\s*ገደብ|የማመልከቻ\s*ቀን|የመጨረሻ\s*ቀን"     # Amharic: deadline / application date / last date
+    r"(?:" +
+    "|".join(_phrase_to_pattern(kw) for kw in DEADLINE_KEYWORDS) +
     r")"
 )
+
+# ── Fuzzy matching infrastructure ─────────────────────────────────────────
+FUZZY_THRESHOLD = 70  # 0-100, same default as the keyword matcher
+
+# Lowercase versions for fuzzy comparison
+_KEYWORDS_LOWER = [kw.lower() for kw in DEADLINE_KEYWORDS]
+
+def _load_fuzz() -> Any:
+    """Import rapidfuzz.fuzz if available, else return None."""
+    try:
+        from rapidfuzz import fuzz as _fuzz_mod  # noqa: WPS433
+        return _fuzz_mod
+    except ImportError:
+        return None
+
+_fuzz = _load_fuzz()
 
 # ── date patterns ─────────────────────────────────────────────────────────
 # After removing ordinal suffixes the date part is expected in one of these:
@@ -91,6 +146,11 @@ _PATTERNS_NO_YEAR = [
     re.compile(_TRIGGER_PREFIX + r"(?:" + dp + r")", re.IGNORECASE | re.UNICODE)
     for dp in _DATE_GROUPS_NO_YEAR
 ]
+
+# Standalone date patterns (no trigger) — used after fuzzy confirms a trigger
+# is present on a nearby line.
+_ALL_DATE_ALTS = "|".join(_DATE_GROUPS_WITH_YEAR + _DATE_GROUPS_NO_YEAR)
+_DATE_ONLY = re.compile(_ALL_DATE_ALTS, re.IGNORECASE)
 
 
 def _month_from_name(name: str) -> Optional[int]:
@@ -155,6 +215,66 @@ def _extract_from_match(m: re.Match[str]) -> Optional[date]:
     return None
 
 
+# ── Regex-based extraction (exact trigger match) ─────────────────────────
+def _extract_regex(cleaned: str) -> Optional[date]:
+    """Try every trigger+date regex pattern against the full text."""
+    for pattern in _PATTERNS_WITH_YEAR:
+        for m in pattern.finditer(cleaned):
+            result = _extract_from_match(m)
+            if result is not None:
+                return result
+
+    for pattern in _PATTERNS_NO_YEAR:
+        for m in pattern.finditer(cleaned):
+            result = _extract_from_match(m)
+            if result is not None:
+                return result
+
+    return None
+
+
+# ── Fuzzy-based extraction (misspelled triggers) ─────────────────────────
+def _extract_fuzzy(cleaned: str, threshold: int = FUZZY_THRESHOLD) -> Optional[date]:
+    """Use rapidfuzz to find misspelled trigger phrases, then look for a date nearby.
+
+    Strategy: split the text into lines, score each line against every keyword.
+    When a line scores above the threshold, scan that line (and the next) for a
+    date pattern.  This keeps false positives low — the fuzzy hit and the date
+    must be close together.
+    """
+    if _fuzz is None:
+        return None
+
+    lines = cleaned.splitlines()
+    for i, line in enumerate(lines):
+        line_lower = line.lower()
+        # Check if any deadline keyword fuzzy-matches this line
+        hit = False
+        for kw_lower in _KEYWORDS_LOWER:
+            score = _fuzz.partial_ratio(kw_lower, line_lower)
+            if score >= threshold:
+                hit = True
+                break
+
+        if not hit:
+            continue
+
+        # A trigger was fuzzy-matched on this line.  Look for a date on this
+        # line and, if the date might wrap, on the next line too.
+        search_zone = line
+        if i + 1 < len(lines):
+            search_zone += " " + lines[i + 1]
+
+        # Try year-bearing date patterns first
+        for dp_re in (_DATE_GROUPS_WITH_YEAR + _DATE_GROUPS_NO_YEAR):
+            for m in re.finditer(dp_re, search_zone, re.IGNORECASE):
+                result = _extract_from_match(m)
+                if result is not None:
+                    return result
+
+    return None
+
+
 def extract_deadline(text: str | None) -> Optional[date]:
     """Return the first deadline date found in *text*, or ``None``.
 
@@ -169,17 +289,10 @@ def extract_deadline(text: str | None) -> Optional[date]:
     # Normalise ordinal suffixes so "20th" becomes "20"
     cleaned = _ORDINAL.sub(r"\1", text)
 
-    # Try year-bearing patterns first (higher confidence), then no-year fallbacks.
-    for pattern in _PATTERNS_WITH_YEAR:
-        for m in pattern.finditer(cleaned):
-            result = _extract_from_match(m)
-            if result is not None:
-                return result
+    # 1) Try exact regex triggers first (fast, high confidence).
+    result = _extract_regex(cleaned)
+    if result is not None:
+        return result
 
-    for pattern in _PATTERNS_NO_YEAR:
-        for m in pattern.finditer(cleaned):
-            result = _extract_from_match(m)
-            if result is not None:
-                return result
-
-    return None
+    # 2) Fall back to fuzzy trigger matching (catches misspellings).
+    return _extract_fuzzy(cleaned)
