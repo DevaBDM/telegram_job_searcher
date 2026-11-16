@@ -57,10 +57,12 @@ class TelegramConfig:
 
 @dataclass
 class FilterConfig:
+    rules: List[str] = field(default_factory=list)
     keywords: List[str] = field(default_factory=list)
     priority_keywords: List[str] = field(default_factory=list)
     must_include: List[str] = field(default_factory=list)
     exclude: List[str] = field(default_factory=list)
+    exclude_symbol: str = "!"
     case_sensitive: bool = False
     whole_word: bool = False
     fuzzy: bool = False          # approximate matching for plain keywords (misspelling tolerance)
@@ -303,12 +305,14 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
     # --- filters --------------------------------------------------------- #
     raw_filters = _section(data, "filters")
     filters = FilterConfig(
+        rules=_as_list(raw_filters.get("rules"), "filters.rules"),
         keywords=_as_list(raw_filters.get("keywords"), "filters.keywords"),
         priority_keywords=_as_list(
             raw_filters.get("priority_keywords"), "filters.priority_keywords"
         ),
         must_include=_as_list(raw_filters.get("must_include"), "filters.must_include"),
         exclude=_as_list(raw_filters.get("exclude"), "filters.exclude"),
+        exclude_symbol=str(raw_filters.get("exclude_symbol") or "!"),
         case_sensitive=_as_bool(raw_filters.get("case_sensitive"), False),
         whole_word=_as_bool(raw_filters.get("whole_word"), False),
         fuzzy=_as_bool(raw_filters.get("fuzzy"), False),
@@ -321,10 +325,10 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             "filters.fuzzy_threshold must be between 0 and 100, "
             f"got {filters.fuzzy_threshold!r}."
         )
-    if not filters.keywords and not filters.priority_keywords:
+    if not filters.rules and not filters.keywords and not filters.priority_keywords:
         raise ConfigError(
-            "No 'filters.keywords' or 'filters.priority_keywords' configured — nothing would ever match. "
-            "Add at least one keyword."
+            "No 'filters.rules' or 'filters.keywords' configured — nothing would ever match. "
+            "Add at least one rule or keyword."
         )
 
     # --- saving ---------------------------------------------------------- #

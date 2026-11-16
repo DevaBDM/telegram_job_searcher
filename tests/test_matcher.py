@@ -1,8 +1,4 @@
-"""Self-tests for the matching logic. No Telegram account needed.
-
-Run with:  python -m unittest discover -s tests -v
-       or: python tests/test_matcher.py
-"""
+"""Tests for KeywordMatcher adapter and backwards compatibility with legacy config."""
 
 from __future__ import annotations
 
@@ -13,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from jobsaver.config import FilterConfig  # noqa: E402
-from jobsaver.matcher import KeywordMatcher  # noqa: E402
+from jobsaver.matcher import Decision, KeywordMatcher  # noqa: E402
 
 
 def matcher(**kwargs) -> KeywordMatcher:
@@ -33,11 +29,12 @@ class MatcherTests(unittest.TestCase):
         self.assertFalse(matcher().match("").matched)
         self.assertFalse(matcher().match(None).matched)
 
-    def test_or_logic_reports_all_hits(self):
+    def test_priority_reporting(self):
         m = matcher(keywords=["python", "django", "flask"])
         result = m.match("Senior Python / Django engineer")
         self.assertTrue(result.matched)
-        self.assertEqual(result.keywords, ("python", "django"))
+        self.assertEqual(result.decision, Decision.INCLUDE)
+        self.assertIn(result.matched_keyword, ("python", "django"))
 
     def test_must_include_is_and_logic(self):
         m = matcher(keywords=["python"], must_include=["remote"])
@@ -48,24 +45,21 @@ class MatcherTests(unittest.TestCase):
         m = matcher(keywords=["python"], exclude=["unpaid"])
         result = m.match("Unpaid python internship")
         self.assertFalse(result.matched)
+        self.assertEqual(result.decision, Decision.EXCLUDE)
 
     def test_priority_keyword_overrides_exclude(self):
-        # When a priority keyword matches, exclude is ignored
         m = matcher(
             keywords=["python"],
             priority_keywords=["lead architect"],
             exclude=["unpaid", "internship"],
         )
-        # Normal keyword is excluded
         self.assertFalse(m.match("Unpaid python internship").matched)
-        # Priority keyword matches even with exclude terms present
         result = m.match("Looking for a Python Lead Architect for an unpaid internship")
         self.assertTrue(result.matched)
-        self.assertIn("lead architect", result.keywords)
-        self.assertIn("python", result.keywords)
+        self.assertEqual(result.decision, Decision.INCLUDE)
+        self.assertEqual(result.matched_keyword, "lead architect")
 
     def test_priority_keyword_must_include_still_required(self):
-        # must_include is an AND requirement for all matches
         m = matcher(
             priority_keywords=["python"],
             must_include=["remote"],
@@ -74,30 +68,15 @@ class MatcherTests(unittest.TestCase):
         self.assertFalse(m.match("Python internship in Addis").matched)
         self.assertTrue(m.match("Remote Python internship").matched)
 
-    def test_whole_word(self):
-        strict = matcher(keywords=["python"], whole_word=True)
-        self.assertFalse(strict.match("pythonista wanted").matched)
-        self.assertTrue(strict.match("python developer").matched)
+    def test_multiword_phrase(self):
+        m = matcher(keywords=["data engineer"])
+        self.assertTrue(m.match("Hiring a Data Engineer").matched)
+        self.assertFalse(m.match("data processing engineer").matched)
 
     def test_case_sensitive(self):
         strict = matcher(keywords=["Python"], case_sensitive=True)
         self.assertFalse(strict.match("python developer").matched)
         self.assertTrue(strict.match("Python developer").matched)
-
-    def test_regex_prefix(self):
-        m = matcher(keywords=[r"re:\b(?:senior|lead)\s+python"])
-        self.assertTrue(m.match("Senior Python Engineer").matched)
-        self.assertFalse(m.match("Junior Python Engineer").matched)
-
-    def test_regex_with_salary(self):
-        m = matcher(keywords=[r"re:(?:\$|€)\s?\d{2,3}\s?k\b"])
-        self.assertTrue(m.match("Salary: $120k per year").matched)
-        self.assertFalse(m.match("Salary: 120 dollars").matched)
-
-    def test_multiword_phrase(self):
-        m = matcher(keywords=["data engineer"])
-        self.assertTrue(m.match("Hiring a Data Engineer").matched)
-        self.assertFalse(m.match("data processing engineer").matched)
 
     # ------------------------------------------------------------------ #
     # Fuzzy matching
@@ -113,11 +92,6 @@ class MatcherTests(unittest.TestCase):
 
     def test_fuzzy_disabled_misspelling_no_match(self):
         m = matcher(keywords=["python"], fuzzy=False)
-        self.assertFalse(m.match("pythn developer").matched)
-
-    def test_fuzzy_regex_still_exact(self):
-        m = matcher(keywords=[r"re:\bpython\b"], fuzzy=True, fuzzy_threshold=70)
-        self.assertTrue(m.match("python developer").matched)
         self.assertFalse(m.match("pythn developer").matched)
 
     def test_fuzzy_multiword(self):

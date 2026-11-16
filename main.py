@@ -251,6 +251,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="channels to watch: 'list' (default) | add REF... | set REF... | remove REF...",
     )
     lists.add_argument(
+        "--rules", nargs="*", metavar="ACTION|RULE", default=None,
+        help="filters.rules: 'list' (default) | add RULE... | set RULE... | remove RULE...",
+    )
+    lists.add_argument(
         "--keywords", nargs="*", metavar="ACTION|WORD", default=None,
         help="filters.keywords: 'list' (default) | add WORD... | set WORD... | remove WORD...",
     )
@@ -382,6 +386,9 @@ def cmd_manage_lists(config_path: str, args: argparse.Namespace) -> bool:
     if args.sources is not None:
         action, items = _parse_list_action(args.sources, "sources")
         jobs.append(("sources", None, action, items))
+    if args.rules is not None:
+        action, items = _parse_list_action(args.rules, "rules")
+        jobs.append(("rules", "filters", action, items))
     if args.keywords is not None:
         action, items = _parse_list_action(args.keywords, "keywords")
         jobs.append(("keywords", "filters", action, items))
@@ -413,9 +420,14 @@ def main(argv: list[str] | None = None) -> int:
     configure_output()
     args = build_parser().parse_args(argv)
 
-    # --sources / --keywords edit config.yaml directly, so they run before the
+    # --sources / --keywords / --rules edit config.yaml directly, so they run before the
     # file is validated (you may be building the lists from an empty state).
-    if args.sources is not None or args.keywords is not None or args.priority_keywords is not None:
+    if (
+        args.sources is not None
+        or args.rules is not None
+        or args.keywords is not None
+        or args.priority_keywords is not None
+    ):
         try:
             cmd_manage_lists(args.config, args)
         except (ConfigError, ConfigFileError) as exc:

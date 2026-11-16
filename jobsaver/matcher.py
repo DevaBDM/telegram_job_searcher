@@ -1,126 +1,262 @@
-"""Keyword matching engine.
+"""Priority Substring Matching System using Aho-Corasick automaton.
 
-Rules
------
-* A plain keyword is a substring match:  ``python`` matches "Python developer".
-* Prefix a keyword with ``re:`` to use a regular expression: ``re:\\bsenior\\b``
-* ``priority_keywords`` -> if ANY matches, the post matches immediately and
-  ignores ``exclude`` rules!
-* ``keywords``          -> at least ONE must match (OR), but subject to ``exclude``.
-* ``must_include``      -> ALL of them must match (AND).
-* ``exclude``           -> if ANY matches (and no priority keyword matched), the
-  message is dropped.
-* ``fuzzy`` / ``fuzzy_threshold`` -> plain keywords also match by approximate
-  string matching (rapidfuzz partial_ratio), so misspellings like "pythn"
-  still match "python" when the score is above the threshold.
+Technical Specification:
+- Rules are provided as an ordered list of strings (index 0 is highest priority).
+- Inclusion rule: Any string not beginning with exclude_symbol (e.g. "critical bug").
+- Exclusion rule: Any string beginning with exclude_symbol (e.g. "!bug").
+- Conflict Resolution: "Lowest index wins" (min(matched_indices)).
+- Three-state output: Decision.INCLUDE, Decision.EXCLUDE, Decision.UNMATCHED.
+- Early exit optimization: If index 0 is matched, traversal terminates immediately.
+- Duplicate keywords: First occurrence takes precedence.
+- Also preserves:
+  * `must_include`: Mandatory substrings that all must appear in text.
+  * `fuzzy`: Fallback approximate matching via rapidfuzz if exact Aho-Corasick matches nothing.
 """
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
-from typing import Any, List, Pattern, Tuple
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar
+
+try:
+    import ahocorasick
+except ImportError:  # pragma: no cover
+    ahocorasick = None  # type: ignore
 
 from .config import ConfigError, FilterConfig
 
-REGEX_PREFIX = "re:"
+T = TypeVar("T")
+
+
+class Decision(str, Enum):
+    INCLUDE = "INCLUDE"
+    EXCLUDE = "EXCLUDE"
+    UNMATCHED = "UNMATCHED"
 
 
 @dataclass(frozen=True)
 class MatchResult:
-    """Outcome of evaluating one message."""
+    """Outcome of evaluating one text string against rules."""
 
-    matched: bool
-    keywords: Tuple[str, ...] = ()
-    excluded_by: str | None = None
+    decision: Decision
+    matched_rule_index: Optional[int] = None
+    matched_keyword: Optional[str] = None
+    excluded_by: Optional[str] = None
 
-    def __bool__(self) -> bool:  # allows ``if result:``
+    @property
+    def matched(self) -> bool:
+        """True if the decision is INCLUDE."""
+        return self.decision == Decision.INCLUDE
+
+    @property
+    def keywords(self) -> Tuple[str, ...]:
+        """Tuple of matched keywords for backwards-compatibility with logging/storage."""
+        if self.matched_keyword is not None:
+            return (self.matched_keyword,)
+        return ()
+
+    def __bool__(self) -> bool:
+        """Allows `if result:` to evaluate True if INCLUDE."""
         return self.matched
 
 
-def _compile(raw: str, whole_word: bool, flags: int) -> Pattern[str]:
-    """Turn one config entry into a compiled regex."""
-    text = raw.strip()
-    if text.lower().startswith(REGEX_PREFIX):
-        expression = text[len(REGEX_PREFIX):].strip()
-        if not expression:
-            raise ConfigError(f"Empty regular expression in filters: {raw!r}")
-        try:
-            return re.compile(expression, flags)
-        except re.error as exc:
-            raise ConfigError(f"Invalid regular expression {expression!r}: {exc}") from exc
+class PriorityMatcher:
+    """Aho-Corasick priority substring matching engine."""
 
-    body = re.escape(text).replace(r"\ ", " ")
-    if whole_word:
-        body = rf"(?<!\w){body}(?!\w)"
-    return re.compile(body, flags)
+    def __init__(
+        self,
+        rules: Sequence[str],
+        exclude_symbol: str = "!",
+        case_sensitive: bool = False,
+        must_include: Optional[Sequence[str]] = None,
+        fuzzy: bool = False,
+        fuzzy_threshold: int = 70,
+    ) -> None:
+        self.exclude_symbol = exclude_symbol
+        self.case_sensitive = case_sensitive
+        self.fuzzy_enabled = fuzzy
+        self.fuzzy_threshold = fuzzy_threshold
+        self.must_include = [w.strip() for w in (must_include or []) if w.strip()]
 
+        # Compile must_include
+        self._must_include_normalized = [
+            w if case_sensitive else w.lower() for w in self.must_include
+        ]
 
-def _compile_all(entries: List[str], whole_word: bool, flags: int) -> List[Tuple[str, Pattern[str]]]:
-    return [(entry, _compile(entry, whole_word, flags)) for entry in entries]
+        # Prepare rules
+        self.raw_rules: List[str] = list(rules)
+        self._compiled_rules: List[Tuple[int, Decision, str, str]] = []  # (orig_idx, decision, target, raw)
+        seen_targets: set[str] = set()
 
+        for idx, raw in enumerate(rules):
+            stripped = raw.strip()
+            if not stripped:
+                continue
 
-class KeywordMatcher:
-    """Compiles the filters once and evaluates message text against them."""
+            if stripped.startswith(exclude_symbol):
+                target = stripped[len(exclude_symbol):].strip()
+                decision = Decision.EXCLUDE
+            else:
+                target = stripped
+                decision = Decision.INCLUDE
 
-    def __init__(self, config: FilterConfig):
-        flags = 0 if config.case_sensitive else re.IGNORECASE
-        self.case_sensitive = config.case_sensitive
-        self.whole_word = config.whole_word
-        self.fuzzy_enabled = config.fuzzy
-        self.fuzzy_threshold = config.fuzzy_threshold
-        self._priority_keywords = _compile_all(config.priority_keywords, config.whole_word, flags)
-        self._keywords = _compile_all(config.keywords, config.whole_word, flags)
-        self._must_include = _compile_all(config.must_include, config.whole_word, flags)
-        self._exclude = _compile_all(config.exclude, config.whole_word, flags)
-        self._fuzzy: Any = None
+            if not target:
+                # Bare prefix like "!" with no keyword
+                continue
+
+            norm_target = target if case_sensitive else target.lower()
+            if norm_target in seen_targets:
+                # Duplicate keyword: lowest index takes permanent precedence
+                continue
+
+            seen_targets.add(norm_target)
+            self._compiled_rules.append((idx, decision, norm_target, stripped))
+
+        # Build Aho-Corasick automaton
+        if ahocorasick is not None:
+            self.automaton = ahocorasick.Automaton()
+            for orig_idx, decision, norm_target, raw in self._compiled_rules:
+                # Value stored in automaton: (orig_idx, decision, target, raw)
+                self.automaton.add_word(norm_target, (orig_idx, decision, norm_target, raw))
+            if self._compiled_rules:
+                self.automaton.make_automaton()
+        else:
+            self.automaton = None
+
+        # Prepare fuzzy matching if enabled
+        self._fuzz: Any = None
         if self.fuzzy_enabled:
             try:
                 from rapidfuzz import fuzz as _fuzz_mod  # noqa: WPS433
-            except ImportError as exc:  # pragma: no cover - dependency missing
+                self._fuzz = _fuzz_mod
+            except ImportError as exc:  # pragma: no cover
                 raise ConfigError(
                     "filters.fuzzy is true but 'rapidfuzz' is not installed. "
-                    "Run:  pip install rapidfuzz"
+                    "Run: pip install rapidfuzz"
                 ) from exc
-            self._fuzzy = _fuzz_mod
 
-    def _find_matches(self, patterns: List[Tuple[str, Pattern[str]]], text: str, lower_text: str) -> List[str]:
-        hits: List[str] = []
-        for raw, pattern in patterns:
-            if pattern.search(text):
-                hits.append(raw)
-            elif self.fuzzy_enabled and self._fuzzy is not None:
-                score = self._fuzzy.partial_ratio(raw.lower(), lower_text)
-                if score >= self.fuzzy_threshold:
-                    hits.append(raw)
-        return hits
-
-    def match(self, text: str | None) -> MatchResult:
+    def evaluate(self, text: str | None) -> MatchResult:
+        """Evaluate text against must_include and the ordered priority rules."""
         if not text or not text.strip():
-            return MatchResult(False)
+            return MatchResult(Decision.UNMATCHED)
 
-        lower_text = text.lower() if self.fuzzy_enabled else ""
+        search_text = text if self.case_sensitive else text.lower()
 
-        # 1. Check must_include (AND requirements apply to all matches)
-        for raw, pattern in self._must_include:
-            if not pattern.search(text):
-                return MatchResult(False, excluded_by=f"missing:{raw}")
+        # 1. Check must_include (AND logic)
+        for idx, req in enumerate(self._must_include_normalized):
+            if req not in search_text:
+                return MatchResult(Decision.UNMATCHED, excluded_by=f"missing:{self.must_include[idx]}")
 
-        # 2. Check priority keywords: if any match, ignore excludes!
-        priority_hits = self._find_matches(self._priority_keywords, text, lower_text)
-        if priority_hits:
-            # Also collect any regular keyword matches that also appear
-            normal_hits = self._find_matches(self._keywords, text, lower_text)
-            return MatchResult(True, keywords=tuple(priority_hits + normal_hits))
+        # If rule list is empty, returns UNMATCHED
+        if not self._compiled_rules:
+            return MatchResult(Decision.UNMATCHED)
 
-        # 3. If no priority keywords matched, check exclude list
-        for raw, pattern in self._exclude:
-            if pattern.search(text):
-                return MatchResult(False, excluded_by=raw)
+        # 2. Check matches across ordered rules
+        # First, run Aho-Corasick exact matching with early-exit on index 0
+        exact_matches: Dict[int, Tuple[Decision, str]] = {}
+        if self.automaton is not None:
+            for _, (orig_idx, decision, _, raw) in self.automaton.iter(search_text):
+                if orig_idx not in exact_matches:
+                    exact_matches[orig_idx] = (decision, raw)
+                # Early exit optimization: Index 0 is the highest possible priority
+                if orig_idx == 0:
+                    break
 
-        # 4. Check regular keywords
-        normal_hits = self._find_matches(self._keywords, text, lower_text)
-        if not normal_hits:
-            return MatchResult(False)
+        if 0 in exact_matches:
+            dec, kw = exact_matches[0]
+            return MatchResult(
+                decision=dec,
+                matched_rule_index=0,
+                matched_keyword=kw,
+                excluded_by=kw if dec == Decision.EXCLUDE else None,
+            )
 
-        return MatchResult(True, keywords=tuple(normal_hits))
+        # Iterate rules in priority order (0 to N).
+        # At each index: if it matched exactly via Aho-Corasick, or if fuzzy is enabled
+        # and it fuzzy-matches with score >= fuzzy_threshold, this rule WINS immediately.
+        for orig_idx, decision, norm_target, raw in self._compiled_rules:
+            # Check exact match
+            if orig_idx in exact_matches:
+                dec, kw = exact_matches[orig_idx]
+                return MatchResult(
+                    decision=dec,
+                    matched_rule_index=orig_idx,
+                    matched_keyword=kw,
+                    excluded_by=kw if dec == Decision.EXCLUDE else None,
+                )
+
+            # Check fuzzy match if enabled
+            if self.fuzzy_enabled and self._fuzz is not None:
+                score = self._fuzz.partial_ratio(norm_target, search_text)
+                if score >= self.fuzzy_threshold:
+                    return MatchResult(
+                        decision=decision,
+                        matched_rule_index=orig_idx,
+                        matched_keyword=raw,
+                        excluded_by=raw if decision == Decision.EXCLUDE else None,
+                    )
+
+        return MatchResult(Decision.UNMATCHED)
+
+    # Alias match for compatibility
+    def match(self, text: str | None) -> MatchResult:
+        return self.evaluate(text)
+
+    # ── Collection Operations ─────────────────────────────────────────────
+    def filter_included(self, texts: Sequence[str]) -> List[str]:
+        """Returns only items that evaluate to Decision.INCLUDE."""
+        return [t for t in texts if self.evaluate(t).decision == Decision.INCLUDE]
+
+    def filter_excluded(self, texts: Sequence[str]) -> List[str]:
+        """Returns only items that evaluate to Decision.EXCLUDE."""
+        return [t for t in texts if self.evaluate(t).decision == Decision.EXCLUDE]
+
+    def filter_unmatched(self, texts: Sequence[str]) -> List[str]:
+        """Returns only items that evaluate to Decision.UNMATCHED."""
+        return [t for t in texts if self.evaluate(t).decision == Decision.UNMATCHED]
+
+    def partition_items(
+        self, items: Sequence[T], key: Callable[[T], str] = lambda x: str(x)
+    ) -> Dict[Decision, List[T]]:
+        """Partitions an arbitrary sequence of objects by Decision."""
+        partitioned: Dict[Decision, List[T]] = {
+            Decision.INCLUDE: [],
+            Decision.EXCLUDE: [],
+            Decision.UNMATCHED: [],
+        }
+        for item in items:
+            decision = self.evaluate(key(item)).decision
+            partitioned[decision].append(item)
+        return partitioned
+
+
+class KeywordMatcher(PriorityMatcher):
+    """Adapter bridging legacy FilterConfig (or new rules) to PriorityMatcher."""
+
+    def __init__(self, config: FilterConfig):
+        # Build unified ordered rules list
+        if config.rules:
+            combined_rules = list(config.rules)
+        else:
+            # Automatic mapping for legacy config format:
+            # priority_keywords (0..P-1) -> exclude (!...) -> keywords
+            combined_rules = []
+            for kw in config.priority_keywords:
+                combined_rules.append(kw)
+            for ex in config.exclude:
+                prefix = config.exclude_symbol if hasattr(config, "exclude_symbol") else "!"
+                combined_rules.append(f"{prefix}{ex.lstrip(prefix)}")
+            for kw in config.keywords:
+                combined_rules.append(kw)
+
+        exclude_symbol = getattr(config, "exclude_symbol", "!")
+
+        super().__init__(
+            rules=combined_rules,
+            exclude_symbol=exclude_symbol,
+            case_sensitive=config.case_sensitive,
+            must_include=config.must_include,
+            fuzzy=config.fuzzy,
+            fuzzy_threshold=config.fuzzy_threshold,
+        )

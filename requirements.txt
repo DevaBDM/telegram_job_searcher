@@ -7,3 +7,6 @@ tzdata>=2024.1; platform_system == "Windows"
 
 # Optional fuzzy keyword matching (misspelling tolerance).
 rapidfuzz>=3.0.0
+
+# Priority Substring Matching System (Aho-Corasick automaton)
+pyahocorasick>=2.0.0

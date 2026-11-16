@@ -33,49 +33,42 @@ sources:
 
 filters:
   case_sensitive: false
-  whole_word: false              # true → "python" won't match "pythonista"
+  exclude_symbol: "!"            # prefix for exclusion rules (default "!")
 
   # Approximate keyword matching (misspelling tolerance).
-  #   fuzzy: true        → plain keywords also match via rapidfuzz partial_ratio
+  #   fuzzy: true        → also matches via rapidfuzz partial_ratio
   #   fuzzy_threshold: 70 → minimum score (0-100); lower = more lenient
-  # Example: "pythn" matches "python developer" at score ~89.
   fuzzy: false
   fuzzy_threshold: 70
 
-  # At least ONE of these must appear in the post (OR logic).
-  # Plain text = simple substring. Prefix with "re:" for a regular expression.
-  # Manage from the terminal:  python main.py --keywords add "backend developer"
-  #                            python main.py --keywords set python django
-  keywords:
-    - python
-    - django
-    - fastapi
-    - "backend developer"
-    - "data engineer"
-    - "full stack"
-    - 're:\b(?:senior|lead|principal)\s+(?:python|backend|data)\b'
-    - 're:\b(?:remote|hybrid|onsite)\b.*\b(?:python|django|backend)\b'
-    - 're:(?:\$|€|£)\s?\d{2,3}\s?(?:k|/yr)?\b'
+  # Priority Substring Rules (Aho-Corasick automaton)
+  # Position defines priority: index 0 is highest priority.
+  # "Lowest index wins": higher-priority inclusion overrides lower-priority exclusion,
+  # and higher-priority exclusion overrides lower-priority inclusion.
+  # Prefix exclusion rules with "!" (or whatever exclude_symbol is set to).
+  rules:
+    - "lead architect"           # index 0: INCLUDE (beats any exclusion below)
+    - "!unpaid"                  # index 1: EXCLUDE
+    - "!commission only"         # index 2: EXCLUDE
+    - "!internship"              # index 3: EXCLUDE
+    - "!intern"                  # index 4: EXCLUDE
+    - "python"                   # index 5: INCLUDE
+    - "django"                   # index 6: INCLUDE
+    - "fastapi"                  # index 7: INCLUDE
+    - "backend developer"        # index 8: INCLUDE
+    - "data engineer"            # index 9: INCLUDE
+    - "full stack"               # index 10: INCLUDE
 
-  # Keywords that NEVER get excluded by filters.exclude (highest priority).
-  # If any of these match, the post is saved even if it contains words from `exclude`.
-  priority_keywords: []
-  # - "lead architect"
-  # - "staff engineer"
-
-  # ALL of these must also appear (AND logic). Leave empty to disable.
+  # ALL of these must appear in the post (AND logic). Leave empty to disable.
   must_include: []
   # - "ethiopia"
   # - "addis ababa"
 
-  # If ANY of these appear, the post is skipped. Leave empty to disable.
-  exclude:
-    - unpaid
-    - "commission only"
-    - internship
-    - intern
-    - 're:\b(?:no\s+salary|equity\s+only|volunteer)\b'
-    - 're:\b(?:only|must\s+be)\s+(?:male|female)\b'
+  # Legacy format fallback (used when `rules` is omitted):
+  # priority_keywords: [...]     # Immune to exclude
+  # keywords: [...]              # Subject to exclude
+  # exclude: [...]               # Excluded if no priority keyword matches
+
 
 # ───────────────────────────────────────────────────────────────────────────
 #  Which slice of history to read
