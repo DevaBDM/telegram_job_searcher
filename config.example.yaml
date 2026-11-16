@@ -35,6 +35,13 @@ filters:
   case_sensitive: false
   whole_word: false              # true → "python" won't match "pythonista"
 
+  # Approximate keyword matching (misspelling tolerance).
+  #   fuzzy: true        → plain keywords also match via rapidfuzz partial_ratio
+  #   fuzzy_threshold: 70 → minimum score (0-100); lower = more lenient
+  # Example: "pythn" matches "python developer" at score ~89.
+  fuzzy: false
+  fuzzy_threshold: 70
+
   # At least ONE of these must appear in the post (OR logic).
   # Plain text = simple substring. Prefix with "re:" for a regular expression.
   # Manage from the terminal:  python main.py --keywords add "backend developer"

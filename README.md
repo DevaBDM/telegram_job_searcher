@@ -96,6 +96,27 @@ Every entry is either:
 Set `whole_word: true` to make plain keywords word-bounded (`python` no longer
 matches `pythonista`), and `case_sensitive: true` if you want exact case.
 
+### Fuzzy matching (misspelling tolerance)
+
+Set `filters.fuzzy: true` so plain keywords also match via approximate string
+matching (rapidfuzz `partial_ratio`). This catches typos like "pythn",
+"djang0", "backend devloper", etc.
+
+```yaml
+filters:
+  fuzzy: true
+  fuzzy_threshold: 70          # 0-100; lower = more lenient
+```
+
+| setting | default | meaning |
+|---|---|---|
+| `filters.fuzzy` | `false` | enable approximate keyword matching |
+| `filters.fuzzy_threshold` | `70` | minimum fuzzy score (0-100) |
+
+Only plain keywords get fuzzy matching — `re:` regex patterns, `must_include`,
+and `exclude` stay exact.
+
+
 ## 6. Test, then run
 
 ```bash
@@ -317,6 +338,8 @@ python main.py --stats
 | `filters.exclude` | `[]` | any match → post skipped |
 | `filters.case_sensitive` | `false` | exact case matching |
 | `filters.whole_word` | `false` | word boundaries for plain keywords |
+| `filters.fuzzy` | `false` | approximate keyword matching (misspelling tolerance) |
+| `filters.fuzzy_threshold` | `70` | minimum fuzzy score, 0-100 |
 | `saving.mode` | `auto` | `auto` / `forward` / `copy` |
 | `saving.destination` | `me` | `me` = Saved Messages |
 | `saving.include_link` | `true` | add link in copy mode |

@@ -62,6 +62,8 @@ class FilterConfig:
     exclude: List[str] = field(default_factory=list)
     case_sensitive: bool = False
     whole_word: bool = False
+    fuzzy: bool = False          # approximate matching for plain keywords (misspelling tolerance)
+    fuzzy_threshold: int = 70    # 0-100, lower = more lenient (only when fuzzy is true)
 
 
 @dataclass
@@ -305,7 +307,16 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         exclude=_as_list(raw_filters.get("exclude"), "filters.exclude"),
         case_sensitive=_as_bool(raw_filters.get("case_sensitive"), False),
         whole_word=_as_bool(raw_filters.get("whole_word"), False),
+        fuzzy=_as_bool(raw_filters.get("fuzzy"), False),
+        fuzzy_threshold=_as_int(
+            raw_filters.get("fuzzy_threshold"), 70, "filters.fuzzy_threshold"
+        ),
     )
+    if filters.fuzzy and not (0 <= filters.fuzzy_threshold <= 100):
+        raise ConfigError(
+            "filters.fuzzy_threshold must be between 0 and 100, "
+            f"got {filters.fuzzy_threshold!r}."
+        )
     if not filters.keywords:
         raise ConfigError(
             "No 'filters.keywords' configured — nothing would ever match. "

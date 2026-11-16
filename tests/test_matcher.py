@@ -75,6 +75,31 @@ class MatcherTests(unittest.TestCase):
         self.assertTrue(m.match("Hiring a Data Engineer").matched)
         self.assertFalse(m.match("data processing engineer").matched)
 
+    # ------------------------------------------------------------------ #
+    # Fuzzy matching
+    # ------------------------------------------------------------------ #
+    def test_fuzzy_catches_misspelling(self):
+        m = matcher(keywords=["python"], fuzzy=True, fuzzy_threshold=70)
+        self.assertTrue(m.match("Looking for a pythn developer").matched)
+        self.assertIn("python", m.match("pythn developer").keywords)
+
+    def test_fuzzy_threshold_too_strict(self):
+        m = matcher(keywords=["python"], fuzzy=True, fuzzy_threshold=95)
+        self.assertFalse(m.match("pythn developer").matched)
+
+    def test_fuzzy_disabled_misspelling_no_match(self):
+        m = matcher(keywords=["python"], fuzzy=False)
+        self.assertFalse(m.match("pythn developer").matched)
+
+    def test_fuzzy_regex_still_exact(self):
+        m = matcher(keywords=[r"re:\bpython\b"], fuzzy=True, fuzzy_threshold=70)
+        self.assertTrue(m.match("python developer").matched)
+        self.assertFalse(m.match("pythn developer").matched)
+
+    def test_fuzzy_multiword(self):
+        m = matcher(keywords=["backend developer"], fuzzy=True, fuzzy_threshold=70)
+        self.assertTrue(m.match("backend devloper needed").matched)
+
 
 class ConfigTests(unittest.TestCase):
     def test_shipped_config_parses(self):
