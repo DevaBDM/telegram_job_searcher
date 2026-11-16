@@ -234,38 +234,73 @@ def _extract_regex(cleaned: str) -> Optional[date]:
 
 
 # ── Fuzzy-based extraction (misspelled triggers) ─────────────────────────
+def _matches_trigger_fuzzy(chunk: str, threshold: int = FUZZY_THRESHOLD) -> bool:
+    """Check if a word chunk fuzzy-matches any deadline trigger phrase."""
+    if _fuzz is None:
+        return False
+    chunk_clean = chunk.strip(":,.-–— \t").lower()
+    chunk_words = chunk_clean.split()
+    if not chunk_words:
+        return False
+
+    for kw in _KEYWORDS_LOWER:
+        kw_words = kw.split()
+        # Single-word keyword (e.g. "deadline", "expires")
+        if len(kw_words) == 1:
+            if len(chunk_words) == 1 and _fuzz.ratio(kw, chunk_clean) >= threshold:
+                return True
+            # Catches spaced typo like "dead line" for "deadline"
+            if len(chunk_words) == 2 and _fuzz.ratio(kw, chunk_clean.replace(" ", "")) >= threshold:
+                return True
+        # Multi-word keyword of same length (e.g. "closing date" vs "closin date")
+        elif len(kw_words) == len(chunk_words):
+            word_scores = [_fuzz.ratio(w1, w2) for w1, w2 in zip(kw_words, chunk_words)]
+            # Every constituent word must meet threshold so "The date" won't match "due date"
+            if min(word_scores) >= threshold and _fuzz.ratio(kw, chunk_clean) >= threshold:
+                return True
+        # Slight length mismatch (e.g. missing word or extra word)
+        elif abs(len(kw_words) - len(chunk_words)) == 1:
+            if _fuzz.ratio(kw, chunk_clean) >= max(85, threshold):
+                return True
+
+    return False
+
+
 def _extract_fuzzy(cleaned: str, threshold: int = FUZZY_THRESHOLD) -> Optional[date]:
     """Use rapidfuzz to find misspelled trigger phrases, then look for a date nearby.
 
-    Strategy: split the text into lines, score each line against every keyword.
-    When a line scores above the threshold, scan that line (and the next) for a
-    date pattern.  This keeps false positives low — the fuzzy hit and the date
-    must be close together.
+    Scans sliding n-gram windows on each line. When a window fuzzy-matches
+    a trigger keyword, scans that line (and the next) for a date.
     """
     if _fuzz is None:
         return None
 
     lines = cleaned.splitlines()
     for i, line in enumerate(lines):
-        line_lower = line.lower()
-        # Check if any deadline keyword fuzzy-matches this line
+        words = line.split()
+        if not words:
+            continue
+
         hit = False
-        for kw_lower in _KEYWORDS_LOWER:
-            score = _fuzz.partial_ratio(kw_lower, line_lower)
-            if score >= threshold:
-                hit = True
+        # Check 1-word up to 4-word windows
+        max_n = min(4, len(words))
+        for sz in range(1, max_n + 1):
+            for start_idx in range(len(words) - sz + 1):
+                chunk = " ".join(words[start_idx : start_idx + sz])
+                if _matches_trigger_fuzzy(chunk, threshold=threshold):
+                    hit = True
+                    break
+            if hit:
                 break
 
         if not hit:
             continue
 
-        # A trigger was fuzzy-matched on this line.  Look for a date on this
-        # line and, if the date might wrap, on the next line too.
+        # Look for a date in this line and the following line
         search_zone = line
         if i + 1 < len(lines):
             search_zone += " " + lines[i + 1]
 
-        # Try year-bearing date patterns first
         for dp_re in (_DATE_GROUPS_WITH_YEAR + _DATE_GROUPS_NO_YEAR):
             for m in re.finditer(dp_re, search_zone, re.IGNORECASE):
                 result = _extract_from_match(m)
