@@ -96,7 +96,7 @@ async def cmd_login(config: AppConfig) -> None:
             )
             await saver.ensure_authorized()
             safe_print(f"✓ Logged in as {_display_name(await saver.client.get_me())}")
-        safe_print(f"Session saved to: {config.telegram.session_path}")
+        safe_print(f"Session saved to: {config.telegram.session_path}.session")
         safe_print("You can now run `python main.py`.")
     finally:
         await saver.disconnect()
