@@ -236,6 +236,29 @@ python main.py --from "2026-11-01" --to "2026-11-16" --mark-read --once
 A date window that ends in the past only marks messages up to that point, so
 anything newer stays unread. `--dry-run` never changes read state.
 
+### Replace already-saved posts
+
+By default, posts already in `saved_messages` are skipped — even inside an
+explicit `--from` window — so re-running never duplicates them in Saved Messages.
+
+To force a re-send (for example, after you fixed the keywords and want the same
+window re-evaluated):
+
+```bash
+python main.py --from "2026-11-01" --to "2026-11-16" --replace-saved --once
+```
+
+This deletes the old `(chat_id, message_id)` record and writes a fresh one with a
+new `saved_at` timestamp. Combine with `--dry-run` to preview what would be
+re-sent without touching Saved Messages:
+
+```bash
+python main.py --from "2026-11-01" --replace-saved --dry-run --once
+```
+
+Permanent config: `runtime.replace_saved: true` (CLI `--replace-saved` wins
+over the file for that run).
+
 ### Windows bigger than one pass
 
 `scan.max_history_messages` (default 2000) caps how much history one pass reads
@@ -310,6 +333,7 @@ python main.py --stats
 | `runtime.max_messages_per_poll` | `100` | posts handled per chat per cycle |
 | `runtime.max_age_days` | `14` | ignore older posts (`0` = no limit) |
 | `runtime.dry_run` | `false` | never save, only print |
+| `runtime.replace_saved` | `false` | re-send posts already in Saved Messages |
 | `storage.database` | `jobsaver.sqlite3` | dedupe/history database |
 | `storage.log_file` | `logs/jobsaver.log` | rotating log file |
 

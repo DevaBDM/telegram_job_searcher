@@ -462,7 +462,9 @@ class JobSaver:
                     log.debug("[%s] #%s excluded by %r", title, message.id, result.excluded_by)
                 continue
 
-            if self.store.was_saved(chat_id, message.id):
+            # With --replace-saved we intentionally re-send posts that are
+            # already in saved_messages; otherwise skip them.
+            if not self.cfg.runtime.replace_saved and self.store.was_saved(chat_id, message.id):
                 log.debug("[%s] #%s already saved, skipping", title, message.id)
                 continue
 
@@ -500,6 +502,7 @@ class JobSaver:
                 matched=result.keywords,
                 mode=used_mode,
                 link=self.build_link(entity, message.id),
+                replace=self.cfg.runtime.replace_saved,
             )
             saved_count += 1
             safe_print(f"  ✓ {title} #{message.id} → Saved Messages ({', '.join(result.keywords)})")

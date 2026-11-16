@@ -194,9 +194,20 @@ class Store:
         matched: list[str] | tuple[str, ...],
         mode: str,
         link: str | None,
+        replace: bool = False,
     ) -> bool:
-        """Insert one row. Returns False if it was already recorded."""
+        """Insert one row. Returns False if it was already recorded (and not replaced).
+
+        When ``replace`` is True, any existing row for this
+        ``(chat_id, message_id)`` is deleted first so the new write gets a fresh
+        ``saved_at`` timestamp.
+        """
         with self._cursor() as cursor:
+            if replace:
+                cursor.execute(
+                    "DELETE FROM saved_messages WHERE chat_id = ? AND message_id = ?",
+                    (chat_id, message_id),
+                )
             cursor.execute(
                 """
                 INSERT OR IGNORE INTO saved_messages

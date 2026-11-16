@@ -83,6 +83,7 @@ class RuntimeConfig:
     max_messages_per_poll: int = 100
     max_age_days: int = 14
     dry_run: bool = False
+    replace_saved: bool = False  # re-send messages already in saved_messages
 
 
 @dataclass

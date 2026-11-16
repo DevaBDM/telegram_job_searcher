@@ -201,6 +201,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  python main.py --keywords set python django fastapi\n"
             "  python main.py --from 2026-11-01 --to 2026-11-16 --once\n"
             "  python main.py --from '2026-11-14 15:34:45' --mark-read --once\n"
+            "  python main.py --from 2026-11-01 --replace-saved --once   # re-send already-saved posts\n"
             "  python main.py --checkpoint\n"
             "  python main.py --reset-checkpoint --once\n"
         ),
@@ -225,6 +226,10 @@ def build_parser() -> argparse.ArgumentParser:
     window.add_argument(
         "--reset-checkpoint", action="store_true",
         help="forget stored scan progress and start over (saved history is kept)",
+    )
+    window.add_argument(
+        "--replace-saved", dest="replace_saved", action="store_true", default=None,
+        help="re-send and re-record messages already in Saved Messages (default: skip them)",
     )
 
     read_state = parser.add_mutually_exclusive_group()
@@ -275,6 +280,8 @@ def apply_cli_overrides(config: AppConfig, args: argparse.Namespace) -> None:
         config.scan.mark_as_read = args.mark_as_read
     if args.dry_run:
         config.runtime.dry_run = True
+    if args.replace_saved is not None:
+        config.runtime.replace_saved = args.replace_saved
 
 
 # --------------------------------------------------------------------------- #
