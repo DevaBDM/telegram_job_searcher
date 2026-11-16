@@ -141,6 +141,9 @@ python main.py --keywords remove internship
 Notes:
 
 - Duplicates are compared case-insensitively (`@HaHuJobs` == `@hahujobs`).
+- **In PowerShell, always quote `@username`.** A bare `@name` is parsed as
+  splatting and silently dropped, so `--sources add "@hahujobs"` works but
+  `--sources add @hahujobs` does nothing. `-100…` ids are fine unquoted.
 - Use quotes for anything with spaces, for regex keywords
   (`'re:\b(?:django|fastapi)\b'`) and for `-100…` ids if your shell complains.
 - Add `--once` / `--dry-run` to the same command to scan immediately after the
