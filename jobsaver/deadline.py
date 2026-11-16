@@ -28,13 +28,22 @@ from typing import Any, List, Optional
 # ── month names (English + a few Amharic transliterations) ────────────────
 _MONTHS: dict[str, int] = {}
 _EN_MONTHS = [
-    ("january", 1), ("february", 2), ("march", 3), ("april", 4),
-    ("may", 5), ("june", 6), ("july", 7), ("august", 8),
-    ("september", 9), ("october", 10), ("november", 11), ("december", 12),
+    ("january", 1),
+    ("february", 2),
+    ("march", 3),
+    ("april", 4),
+    ("may", 5),
+    ("june", 6),
+    ("july", 7),
+    ("august", 8),
+    ("september", 9),
+    ("october", 10),
+    ("november", 11),
+    ("december", 12),
 ]
 for _name, _num in _EN_MONTHS:
     _MONTHS[_name] = _num
-    _MONTHS[_name[:3]] = _num        # jan, feb, …
+    _MONTHS[_name[:3]] = _num  # jan, feb, …
 
 # Common ordinal suffixes so "20th" parses as 20
 _ORDINAL = re.compile(r"(\d{1,2})\s*(?:st|nd|rd|th)\b", re.IGNORECASE)
@@ -55,6 +64,7 @@ DEADLINE_KEYWORDS: List[str] = [
     "Cut-Off Date",
     "Cutoff Date",
     "Deadline",
+    "Deadline Date",
     "Due Date",
     "End Date",
     "Expiration Date",
@@ -73,6 +83,7 @@ DEADLINE_KEYWORDS: List[str] = [
     "የመጨረሻ ቀን",
 ]
 
+
 # Build the regex alternation from the canonical list.  Multi-word phrases
 # have their spaces relaxed to ``\s+``, and hyphens become ``[\s\-]?``.
 def _phrase_to_pattern(phrase: str) -> str:
@@ -84,11 +95,8 @@ def _phrase_to_pattern(phrase: str) -> str:
     escaped = escaped.replace("-", r"[\\s\\-]?")
     return escaped
 
-_TRIGGER = (
-    r"(?:" +
-    "|".join(_phrase_to_pattern(kw) for kw in DEADLINE_KEYWORDS) +
-    r")"
-)
+
+_TRIGGER = r"(?:" + "|".join(_phrase_to_pattern(kw) for kw in DEADLINE_KEYWORDS) + r")"
 
 # ── Fuzzy matching infrastructure ─────────────────────────────────────────
 FUZZY_THRESHOLD = 70  # 0-100, same default as the keyword matcher
@@ -96,13 +104,16 @@ FUZZY_THRESHOLD = 70  # 0-100, same default as the keyword matcher
 # Lowercase versions for fuzzy comparison
 _KEYWORDS_LOWER = [kw.lower() for kw in DEADLINE_KEYWORDS]
 
+
 def _load_fuzz() -> Any:
     """Import rapidfuzz.fuzz if available, else return None."""
     try:
         from rapidfuzz import fuzz as _fuzz_mod  # noqa: WPS433
+
         return _fuzz_mod
     except ImportError:
         return None
+
 
 _fuzz = _load_fuzz()
 
@@ -115,21 +126,17 @@ _ISO = r"(?P<y1>\d{4})[\-/](?P<m1>\d{1,2})[\-/](?P<d1>\d{1,2})"
 # 20-11-2026  or  20/11/2026  (DD-MM-YYYY)
 _DMY_NUM = r"(?P<d2>\d{1,2})[\-/](?P<m2>\d{1,2})[\-/](?P<y2>\d{4})"
 
-# Nov 20, 2026  or  November 20 2026
-_MONTH_NAME = (
-    r"(?P<mn3>[A-Za-z]+)\.?\s+(?P<d3>\d{1,2})\s*,?\s*(?P<y3>\d{4})"
-)
+# Nov 20, 2026  or  November, 20/2026  or  November 20 2026
+_MONTH_NAME = r"(?P<mn3>[A-Za-z]+)\.?,?\s+(?P<d3>\d{1,2})\s*[\s,/]\s*(?P<y3>\d{4})"
 
-# 20 Nov 2026  or  20 November, 2026
-_DAY_MONTH_NAME = (
-    r"(?P<d4>\d{1,2})\s+(?P<mn4>[A-Za-z]+)\.?\s*,?\s*(?P<y4>\d{4})"
-)
+# 20 Nov 2026  or  20 November, 2026  or  20/November/2026
+_DAY_MONTH_NAME = r"(?P<d4>\d{1,2})\s*[\s,/]\s*(?P<mn4>[A-Za-z]+)\.?,?\s*[\s,/]\s*(?P<y4>\d{4})"
 
-# Nov 20  or  November 20  (no year → assume current/next occurrence)
-_MONTH_DAY_NOYEAR = r"(?P<mn5>[A-Za-z]+)\.?\s+(?P<d5>\d{1,2})"
+# Nov 20  or  November 20  or  November, 20  (no year → assume current/next occurrence)
+_MONTH_DAY_NOYEAR = r"(?P<mn5>[A-Za-z]+)\.?,?\s+(?P<d5>\d{1,2})"
 
 # 20 Nov  (no year)
-_DAY_MONTH_NOYEAR = r"(?P<d6>\d{1,2})\s+(?P<mn6>[A-Za-z]+)"
+_DAY_MONTH_NOYEAR = r"(?P<d6>\d{1,2})\s*[\s,/]\s*(?P<mn6>[A-Za-z]+)"
 
 # Year-bearing patterns tried first (higher priority), then no-year fallbacks.
 _DATE_GROUPS_WITH_YEAR = [_ISO, _DMY_NUM, _MONTH_NAME, _DAY_MONTH_NAME]
@@ -250,13 +257,19 @@ def _matches_trigger_fuzzy(chunk: str, threshold: int = FUZZY_THRESHOLD) -> bool
             if len(chunk_words) == 1 and _fuzz.ratio(kw, chunk_clean) >= threshold:
                 return True
             # Catches spaced typo like "dead line" for "deadline"
-            if len(chunk_words) == 2 and _fuzz.ratio(kw, chunk_clean.replace(" ", "")) >= threshold:
+            if (
+                len(chunk_words) == 2
+                and _fuzz.ratio(kw, chunk_clean.replace(" ", "")) >= threshold
+            ):
                 return True
         # Multi-word keyword of same length (e.g. "closing date" vs "closin date")
         elif len(kw_words) == len(chunk_words):
             word_scores = [_fuzz.ratio(w1, w2) for w1, w2 in zip(kw_words, chunk_words)]
             # Every constituent word must meet threshold so "The date" won't match "due date"
-            if min(word_scores) >= threshold and _fuzz.ratio(kw, chunk_clean) >= threshold:
+            if (
+                min(word_scores) >= threshold
+                and _fuzz.ratio(kw, chunk_clean) >= threshold
+            ):
                 return True
         # Slight length mismatch (e.g. missing word or extra word)
         elif abs(len(kw_words) - len(chunk_words)) == 1:
@@ -301,7 +314,7 @@ def _extract_fuzzy(cleaned: str, threshold: int = FUZZY_THRESHOLD) -> Optional[d
         if i + 1 < len(lines):
             search_zone += " " + lines[i + 1]
 
-        for dp_re in (_DATE_GROUPS_WITH_YEAR + _DATE_GROUPS_NO_YEAR):
+        for dp_re in _DATE_GROUPS_WITH_YEAR + _DATE_GROUPS_NO_YEAR:
             for m in re.finditer(dp_re, search_zone, re.IGNORECASE):
                 result = _extract_from_match(m)
                 if result is not None:

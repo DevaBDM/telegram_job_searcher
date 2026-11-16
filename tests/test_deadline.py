@@ -16,6 +16,8 @@ from jobsaver.deadline import extract_deadline
     ("Deadline: 20/11/2026", date(2026, 11, 20)),
     ("Deadline: 20-11-2026", date(2026, 11, 20)),
     ("DEADLINE : 20 November 2026", date(2026, 11, 20)),
+    ("Deadline Date: November, 20/2026 (7 days left!)", date(2026, 11, 20)),
+    ("Deadline Date: November 20/2026", date(2026, 11, 20)),
 
     # Apply Before / By / Until
     ("Apply before November 30, 2026", date(2026, 11, 30)),
