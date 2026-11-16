@@ -22,6 +22,7 @@ from telethon import TelegramClient, errors, utils
 
 from .config import AppConfig, ConfigError
 from .console import safe_print
+from .deadline import extract_deadline
 from .matcher import KeywordMatcher, MatchResult
 from .store import Store
 
@@ -494,6 +495,9 @@ class JobSaver:
                 break
             self._failed_saves.pop(key, None)
 
+            deadline = extract_deadline(message.text)
+            deadline_str = deadline.isoformat() if deadline else None
+
             self.store.record_saved(
                 chat_id=chat_id,
                 chat_title=title,
@@ -502,10 +506,12 @@ class JobSaver:
                 matched=result.keywords,
                 mode=used_mode,
                 link=self.build_link(entity, message.id),
+                deadline=deadline_str,
                 replace=self.cfg.runtime.replace_saved,
             )
             saved_count += 1
-            safe_print(f"  ✓ {title} #{message.id} → Saved Messages ({', '.join(result.keywords)})")
+            deadline_tag = f" ⏰ deadline {deadline}" if deadline else ""
+            safe_print(f"  ✓ {title} #{message.id} → Saved Messages ({', '.join(result.keywords)}){deadline_tag}")
             log.info(
                 "saved chat=%s msg=%s keywords=%s mode=%s",
                 title,

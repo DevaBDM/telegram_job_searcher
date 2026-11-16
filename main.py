@@ -168,9 +168,10 @@ def cmd_stats(config: AppConfig) -> None:
             return
         safe_print("\nLast 10:")
         for row in rows:
+            deadline_info = f" deadline={row['deadline']}" if row['deadline'] else ""
             safe_print(
                 f"  {row['saved_at']}  {row['chat_title']} #{row['message_id']} "
-                f"[{row['matched']}] {row['link'] or ''}"
+                f"[{row['matched']}]{deadline_info} {row['link'] or ''}"
             )
 
 

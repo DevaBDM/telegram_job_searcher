@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS saved_messages (
     matched      TEXT,
     mode         TEXT,
     link         TEXT,
+    deadline     TEXT,
     saved_at     TEXT NOT NULL,
     UNIQUE (chat_id, message_id)
 );
@@ -82,6 +83,12 @@ class Store:
         }
         if "last_scanned_date" not in columns:
             self._conn.execute("ALTER TABLE chat_state ADD COLUMN last_scanned_date TEXT")
+
+        saved_columns = {
+            row["name"] for row in self._conn.execute("PRAGMA table_info(saved_messages)")
+        }
+        if "deadline" not in saved_columns:
+            self._conn.execute("ALTER TABLE saved_messages ADD COLUMN deadline TEXT")
 
     # ------------------------------------------------------------------ #
     def close(self) -> None:
@@ -194,6 +201,7 @@ class Store:
         matched: list[str] | tuple[str, ...],
         mode: str,
         link: str | None,
+        deadline: str | None = None,
         replace: bool = False,
     ) -> bool:
         """Insert one row. Returns False if it was already recorded (and not replaced).
@@ -211,8 +219,8 @@ class Store:
             cursor.execute(
                 """
                 INSERT OR IGNORE INTO saved_messages
-                    (chat_id, chat_title, message_id, message_date, matched, mode, link, saved_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (chat_id, chat_title, message_id, message_date, matched, mode, link, deadline, saved_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     chat_id,
@@ -222,6 +230,7 @@ class Store:
                     ", ".join(matched),
                     mode,
                     link,
+                    deadline,
                     _now(),
                 ),
             )
