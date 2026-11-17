@@ -89,6 +89,7 @@ class RuntimeConfig:
     max_age_days: int = 14
     dry_run: bool = False
     replace_saved: bool = False  # re-send messages already in saved_messages
+    save_to_telegram: bool = True
 
 
 @dataclass
@@ -388,6 +389,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         ),
         max_age_days=_as_int(raw_runtime.get("max_age_days"), 14, "runtime.max_age_days"),
         dry_run=_as_bool(raw_runtime.get("dry_run"), False),
+        save_to_telegram=_as_bool(raw_runtime.get("save_to_telegram"), True),
     )
     if runtime.poll_interval_seconds < 5:
         runtime.poll_interval_seconds = 5

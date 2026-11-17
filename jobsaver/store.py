@@ -240,6 +240,14 @@ class Store:
         row = self._conn.execute("SELECT COUNT(*) AS n FROM saved_messages").fetchone()
         return int(row["n"]) if row else 0
 
+    def delete_saved(self, chat_id: int, message_id: int) -> bool:
+        with self._cursor() as cursor:
+            cursor.execute("DELETE FROM saved_messages WHERE chat_id = ? AND message_id = ?", (chat_id, message_id))
+            return cursor.rowcount > 0
+
+    def review_jobs(self) -> list[sqlite3.Row]:
+        return list(self._conn.execute("SELECT * FROM saved_messages ORDER BY CASE WHEN deadline IS NULL THEN 1 ELSE 0 END, deadline, message_date DESC, id"))
+
     def recent_saved(self, limit: int = 10) -> list[sqlite3.Row]:
         return list(
             self._conn.execute(

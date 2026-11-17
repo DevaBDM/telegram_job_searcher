@@ -41,6 +41,7 @@ from jobsaver.configfile import ConfigFileError, read_list, write_list
 from jobsaver.console import configure_output, safe_print
 from jobsaver.runner import JobSaver
 from jobsaver.store import Store, from_db
+from telethon.tl import functions
 
 
 # --------------------------------------------------------------------------- #
@@ -181,6 +182,36 @@ async def cmd_run(config: AppConfig, once: bool) -> int:
     return 0
 
 
+async def cmd_review(config: AppConfig) -> int:
+    saver = JobSaver(config)
+    try:
+        await saver.connect()
+        rows = saver.store.review_jobs()
+        for index, row in enumerate(rows, 1):
+            safe_print(f"\n[{index}/{len(rows)}] {row['chat_title']} #{row['message_id']} deadline={row['deadline'] or 'unknown'}")
+            safe_print(row['link'] or '(no public link available)')
+            if row['link']:
+                try:
+                    await saver.client(functions.messages.SendMessageRequest(
+                        peer='me', message=row['link'], random_id=__import__('secrets').randbits(63)
+                    ))
+                except Exception:
+                    pass
+            while True:
+                choice = input("n=next, d=delete, q=quit: ").strip().lower()
+                if choice == "n":
+                    break
+                if choice == "d":
+                    saver.store.delete_saved(row['chat_id'], row['message_id'])
+                    break
+                if choice == "q":
+                    return 0
+    finally:
+        await saver.disconnect()
+        saver.store.close()
+    return 0
+
+
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
@@ -214,6 +245,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--checkpoint", action="store_true", help="show per-chat scan progress and exit")
     parser.add_argument("--once", action="store_true", help="single scan pass, then exit")
     parser.add_argument("--dry-run", action="store_true", help="print matches without saving them")
+    parser.add_argument("--no-save", dest="save_to_telegram", action="store_false", default=None, help="record matches locally without sending them to Saved Messages")
+    parser.add_argument("--save", dest="save_to_telegram", action="store_true", help="send matches to Saved Messages (default)")
+    parser.add_argument("--review", action="store_true", help="review matching posts in deadline order; n=next, d=delete")
 
     window = parser.add_argument_group("scan window")
     window.add_argument(
@@ -291,6 +325,8 @@ def apply_cli_overrides(config: AppConfig, args: argparse.Namespace) -> None:
         config.runtime.dry_run = True
     if args.replace_saved is not None:
         config.runtime.replace_saved = args.replace_saved
+    if args.save_to_telegram is not None:
+        config.runtime.save_to_telegram = args.save_to_telegram
 
 
 # --------------------------------------------------------------------------- #
@@ -433,7 +469,7 @@ def main(argv: list[str] | None = None) -> int:
         except (ConfigError, ConfigFileError) as exc:
             print(f"Configuration error:\n{exc}", file=sys.stderr)
             return 2
-        if not any((args.once, args.dry_run, args.stats, args.checkpoint, args.chats)):
+        if not any((args.once, args.dry_run, args.stats, args.checkpoint, args.chats, args.review)):
             return 0
 
     try:
@@ -452,7 +488,7 @@ def main(argv: list[str] | None = None) -> int:
             f"Cleared scan progress for {cleared} chat(s). "
             "Saved-message history kept (nothing will be duplicated)."
         )
-        if not any((args.once, args.stats, args.checkpoint)):
+        if not any((args.once, args.stats, args.checkpoint, args.review)):
             return 0
 
     try:
@@ -464,6 +500,8 @@ def main(argv: list[str] | None = None) -> int:
             cmd_checkpoints(config)
         elif args.stats:
             cmd_stats(config)
+        elif args.review:
+            asyncio.run(cmd_review(config))
         else:
             return asyncio.run(cmd_run(config, once=args.once))
     except KeyboardInterrupt:

@@ -465,7 +465,7 @@ class JobSaver:
 
             # With --replace-saved we intentionally re-send posts that are
             # already in saved_messages; otherwise skip them.
-            if not self.cfg.runtime.replace_saved and self.store.was_saved(chat_id, message.id):
+            if not self.cfg.runtime.replace_saved and self.cfg.runtime.save_to_telegram and self.store.was_saved(chat_id, message.id):
                 log.debug("[%s] #%s already saved, skipping", title, message.id)
                 continue
 
@@ -475,7 +475,7 @@ class JobSaver:
 
             key = (chat_id, message.id)
             try:
-                used_mode = await self._save_with_retry(entity, message, result)
+                used_mode = await self._save_with_retry(entity, message, result) if self.cfg.runtime.save_to_telegram else "local"
             except Exception as exc:  # noqa: BLE001
                 failures = self._failed_saves.get(key, 0) + 1
                 self._failed_saves[key] = failures
@@ -511,7 +511,7 @@ class JobSaver:
             )
             saved_count += 1
             deadline_tag = f" ⏰ deadline {deadline}" if deadline else ""
-            safe_print(f"  ✓ {title} #{message.id} → Saved Messages ({', '.join(result.keywords)}){deadline_tag}")
+            safe_print(f"  ✓ {title} #{message.id} → {'Saved Messages' if self.cfg.runtime.save_to_telegram else 'local review list'} ({', '.join(result.keywords)}){deadline_tag}")
             log.info(
                 "saved chat=%s msg=%s keywords=%s mode=%s",
                 title,
