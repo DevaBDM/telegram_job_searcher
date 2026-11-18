@@ -266,7 +266,7 @@ class ScanTests(unittest.TestCase):
         self.assertEqual(saver.store.get_last_message_id(-1001234567890), 9)
         self.assertEqual(saver.store.count_saved(), 0)
 
-    def test_dry_run_prints_the_telegram_link(self):
+    def test_dry_run_prints_the_telegram_link_on_one_line(self):
         saver = self.make_saver(runtime=RuntimeConfig(dry_run=True))
         saver.client = FakeClient([make_message(9, "python job")])
 
@@ -274,9 +274,13 @@ class ScanTests(unittest.TestCase):
         with redirect_stdout(out):
             asyncio.run(saver.scan_chat(self.channel))
 
-        printed = out.getvalue()
-        self.assertIn("[DRY-RUN]", printed)
-        self.assertIn("https://t.me/python_jobs/9", printed)
+        lines = [line for line in out.getvalue().splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1)
+        line = lines[0]
+        self.assertIn("[DRY-RUN]", line)
+        self.assertIn("→ python", line)
+        self.assertIn("https://t.me/python_jobs/9", line)
+        self.assertNotIn("#9", line)
 
     def test_append_note_mode(self):
         saver = self.make_saver(saving=SavingConfig(append_note=True))
