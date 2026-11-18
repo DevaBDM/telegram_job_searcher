@@ -265,7 +265,9 @@ python main.py --from "2026-11-01" --to "2026-11-16" --mark-read --once
 ```
 
 A date window that ends in the past only marks messages up to that point, so
-anything newer stays unread. `--dry-run` never changes read state.
+anything newer stays unread. `--dry-run` never changes read state and never
+advances the per-chat checkpoint — a preview cannot consume posts that a later
+real run still needs to see.
 
 ### Replace already-saved posts
 

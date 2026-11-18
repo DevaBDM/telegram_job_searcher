@@ -524,22 +524,26 @@ class JobSaver:
                 used_mode,
             )
 
-        # Advance the checkpoint to the newest message we actually finished.
-        finished = [m for m in messages if m.id <= highest_id and m.date]
-        scanned_until = max((m.date for m in finished), default=None)
+        # A dry run must not consume the history window: leave the checkpoint
+        # and the message cursor untouched, so the next real run (or another
+        # dry run) still sees exactly the same posts.
+        if not self.cfg.runtime.dry_run:
+            # Advance the checkpoint to the newest message we actually finished.
+            finished = [m for m in messages if m.id <= highest_id and m.date]
+            scanned_until = max((m.date for m in finished), default=None)
 
-        if scanned_until is not None:
-            previous = self._progress.get(chat_id)
-            if previous is None or scanned_until > previous:
-                self._progress[chat_id] = scanned_until
+            if scanned_until is not None:
+                previous = self._progress.get(chat_id)
+                if previous is None or scanned_until > previous:
+                    self._progress[chat_id] = scanned_until
 
-        if highest_id or scanned_until:
-            self.store.set_checkpoint(
-                chat_id,
-                title=title,
-                scanned_until=scanned_until,
-                last_message_id=highest_id,
-            )
+            if highest_id or scanned_until:
+                self.store.set_checkpoint(
+                    chat_id,
+                    title=title,
+                    scanned_until=scanned_until,
+                    last_message_id=highest_id,
+                )
 
         if self.cfg.scan.mark_as_read and highest_id and not self.cfg.runtime.dry_run:
             await self.mark_read(entity, title, highest_id)

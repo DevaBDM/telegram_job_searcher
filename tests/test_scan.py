@@ -256,15 +256,29 @@ class ScanTests(unittest.TestCase):
         self.assertIn("t.me/python_jobs/7", text)
         self.assertIn("Python Jobs", text)  # header rendered
 
-    def test_dry_run_saves_nothing_but_advances_cursor(self):
+    def test_dry_run_saves_nothing_and_does_not_advance_state(self):
         saver = self.make_saver(runtime=RuntimeConfig(dry_run=True))
         saver.client = FakeClient([make_message(9, "python job")])
 
         self.assertEqual(asyncio.run(saver.scan_chat(self.channel)), 0)
         self.assertEqual(saver.client.forwarded, [])
         self.assertEqual(saver.client.sent, [])
-        self.assertEqual(saver.store.get_last_message_id(-1001234567890), 9)
+        self.assertEqual(saver.store.get_last_message_id(-1001234567890), 0)
+        self.assertIsNone(saver.store.get_checkpoint(-1001234567890))
         self.assertEqual(saver.store.count_saved(), 0)
+
+    def test_dry_run_keeps_an_existing_checkpoint(self):
+        checkpoint = datetime(2026, 11, 10, tzinfo=timezone.utc)
+        saver = self.make_saver(runtime=RuntimeConfig(dry_run=True))
+        saver.store.set_checkpoint(
+            -1001234567890, title="Python Jobs", scanned_until=checkpoint, last_message_id=5
+        )
+        saver.client = FakeClient([make_message(9, "python job")])
+
+        asyncio.run(saver.scan_chat(self.channel))
+
+        self.assertEqual(saver.store.get_last_message_id(-1001234567890), 5)
+        self.assertEqual(saver.store.get_checkpoint(-1001234567890), checkpoint)
 
     def test_dry_run_prints_the_telegram_link_on_one_line(self):
         saver = self.make_saver(runtime=RuntimeConfig(dry_run=True))
