@@ -31,6 +31,49 @@ log = logging.getLogger("jobsaver")
 FLOOD_EXTRA_SLEEP = 5  # seconds added on top of Telegram's own FloodWait value
 MAX_SAVE_ATTEMPTS = 3  # give up on a single post after this many failed cycles
 
+# Dry-run preview table. Fixed widths keep every column aligned while the rows
+# stream out; the matched rule gets its own column so it never gets lost between
+# the channel name and the link, and the link sits last where its length cannot
+# shift anything else.
+DRY_RUN_MARGIN = "  "  # before the numbering column
+DRY_RUN_CHANNEL_WIDTH = 28
+DRY_RUN_RULE_WIDTH = 24
+
+
+def _clip(text: str, width: int) -> str:
+    """Collapse whitespace and ellipsize so a cell never breaks the columns."""
+    collapsed = " ".join(str(text).split())
+    if len(collapsed) <= width:
+        return collapsed
+    return collapsed[: width - 1].rstrip() + "…"
+
+
+def format_dry_run_header() -> str:
+    """Column titles plus a rule, printed once per dry-run cycle."""
+    return (
+        f"{DRY_RUN_MARGIN}{'#':>3}  "
+        f"{'CHANNEL':<{DRY_RUN_CHANNEL_WIDTH}}  "
+        f"{'MATCHED RULE':<{DRY_RUN_RULE_WIDTH}}  LINK\n"
+        f"{DRY_RUN_MARGIN}{'-' * 3}  "
+        f"{'-' * DRY_RUN_CHANNEL_WIDTH}  "
+        f"{'-' * DRY_RUN_RULE_WIDTH}  {'-' * 4}"
+    )
+
+
+def format_dry_run_match(
+    index: int, title: str, rules: Any, link: Optional[str] = None
+) -> str:
+    """One preview row: aligned columns, then the t.me link."""
+    matched = rules if isinstance(rules, str) else ", ".join(rules)
+    row = (
+        f"{DRY_RUN_MARGIN}{index:>3}  "
+        f"{_clip(title, DRY_RUN_CHANNEL_WIDTH):<{DRY_RUN_CHANNEL_WIDTH}}  "
+        f"{_clip(matched, DRY_RUN_RULE_WIDTH):<{DRY_RUN_RULE_WIDTH}}"
+    )
+    if link:
+        row = f"{row}  {link}"
+    return row.rstrip()
+
 
 def _stdin_is_interactive() -> bool:
     """True when we can safely prompt for a login code."""
@@ -74,6 +117,11 @@ class JobSaver:
         # overrides the stored checkpoint once, but successive passes within the
         # same run must keep moving forward.
         self._progress: Dict[int, datetime] = {}
+        # Dry-run preview state: row numbers restart each cycle, the total feeds
+        # the closing summary.
+        self._preview_index = 0
+        self._preview_header_shown = False
+        self._preview_total = 0
 
     # ------------------------------------------------------------------ #
     # Connection & authentication
@@ -208,6 +256,16 @@ class JobSaver:
                 return f"https://t.me/c/{peer_id[4:]}/{message_id}"
             return None
         return f"https://t.me/c/{internal_id}/{message_id}"
+
+    def _report_dry_run(self, title: str, rules: Any, link: Optional[str]) -> None:
+        """Print one preview row, with the table header on the first match."""
+        self._preview_index += 1
+        self._preview_total += 1
+        if not self._preview_header_shown:
+            self._preview_header_shown = True
+            safe_print("")
+            safe_print(format_dry_run_header())
+        safe_print(format_dry_run_match(self._preview_index, title, rules, link))
 
     async def _flood_sleep(self, exc: errors.FloodWaitError) -> None:
         seconds = int(getattr(exc, "seconds", 60)) + FLOOD_EXTRA_SLEEP
@@ -470,11 +528,9 @@ class JobSaver:
                 continue
 
             if self.cfg.runtime.dry_run:
-                link = self.build_link(entity, message.id)
-                line = f"  · [DRY-RUN] {title} → {', '.join(result.keywords)}"
-                if link:
-                    line += f"  {link}"
-                safe_print(line)
+                self._report_dry_run(
+                    title, result.keywords, self.build_link(entity, message.id)
+                )
                 continue
 
             key = (chat_id, message.id)
@@ -553,6 +609,8 @@ class JobSaver:
     async def scan_cycle(self) -> int:
         entities = await self.resolve_sources()
         total = 0
+        self._preview_index = 0
+        self._preview_header_shown = False
         for entity in entities:
             try:
                 total += await self.scan_chat(entity)
@@ -601,7 +659,13 @@ class JobSaver:
                 elapsed = (datetime.now() - started).total_seconds()
                 log.info("cycle done: %d saved in %.1fs", saved, elapsed)
                 if once:
-                    safe_print(f"Done. {saved} new matching post(s) saved.")
+                    if self.cfg.runtime.dry_run:
+                        safe_print(
+                            f"Done. {self._preview_total} matching post(s) would be "
+                            "saved (dry run — nothing written)."
+                        )
+                    else:
+                        safe_print(f"Done. {saved} new matching post(s) saved.")
                     break
                 if self.window_complete():
                     safe_print(

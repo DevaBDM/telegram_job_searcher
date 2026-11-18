@@ -130,10 +130,22 @@ stay exact.
 ## 6. Test, then run
 
 ```bash
-python main.py --dry-run --once   # print each match + its t.me link, save nothing
+python main.py --dry-run --once   # preview matches as a table, save nothing
 python main.py --once             # one real pass
 python main.py                    # keep polling every 5 minutes
 ```
+
+`--dry-run` prints one row per match, so the matched rule is easy to spot:
+
+```
+    #  CHANNEL                       MATCHED RULE              LINK
+  ---  ----------------------------  ------------------------  ----
+    1  GeezJobs - Ethiopia Jobs      software                  https://t.me/geezjobs_ethiopia/26123
+    2  Info                          w:IT                      https://t.me/newinfo3/5076
+```
+
+Long channel names and long rule lists are ellipsized to keep the columns
+aligned; the link is always last and never truncated.
 
 Press `Ctrl+C` to stop.
 

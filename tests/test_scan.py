@@ -280,21 +280,50 @@ class ScanTests(unittest.TestCase):
         self.assertEqual(saver.store.get_last_message_id(-1001234567890), 5)
         self.assertEqual(saver.store.get_checkpoint(-1001234567890), checkpoint)
 
-    def test_dry_run_prints_the_telegram_link_on_one_line(self):
+    def test_dry_run_prints_an_aligned_table(self):
         saver = self.make_saver(runtime=RuntimeConfig(dry_run=True))
-        saver.client = FakeClient([make_message(9, "python job")])
+        saver.client = FakeClient(
+            [make_message(9, "python job"), make_message(10, "python + django role")]
+        )
 
         out = io.StringIO()
         with redirect_stdout(out):
             asyncio.run(saver.scan_chat(self.channel))
 
         lines = [line for line in out.getvalue().splitlines() if line.strip()]
-        self.assertEqual(len(lines), 1)
-        line = lines[0]
-        self.assertIn("[DRY-RUN]", line)
-        self.assertIn("→ python", line)
-        self.assertIn("https://t.me/python_jobs/9", line)
-        self.assertNotIn("#9", line)
+        # header, its underline, then one row per match
+        self.assertEqual(len(lines), 4)
+        self.assertIn("CHANNEL", lines[0])
+        self.assertIn("MATCHED RULE", lines[0])
+        self.assertTrue(lines[1].lstrip("- ").strip() == "")
+
+        rows = lines[2:]
+        self.assertIn("https://t.me/python_jobs/9", rows[0])
+        self.assertIn("https://t.me/python_jobs/10", rows[1])
+        # the rule column starts at the same offset in every row
+        self.assertEqual(
+            [row.index("python") for row in rows],
+            [rows[0].index("python")] * 2,
+        )
+        self.assertNotIn("#9", "".join(rows))
+        self.assertNotIn("[DRY-RUN]", "".join(rows))
+
+    def test_dry_run_numbers_the_rows(self):
+        saver = self.make_saver(runtime=RuntimeConfig(dry_run=True))
+        saver.client = FakeClient(
+            [make_message(9, "python job"), make_message(10, "python job")]
+        )
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            asyncio.run(saver.scan_chat(self.channel))
+
+        rows = [
+            line
+            for line in out.getvalue().splitlines()
+            if line.strip().startswith(("1", "2"))
+        ]
+        self.assertEqual([row.strip()[0] for row in rows], ["1", "2"])
 
     def test_append_note_mode(self):
         saver = self.make_saver(saving=SavingConfig(append_note=True))
