@@ -364,12 +364,16 @@ python main.py --review --null-first
 
 `--null-first` puts the unknown-deadline posts at the front, ordered by the date
 the job was posted (oldest first), followed by the dated posts in deadline
-order. Every review line shows both values, so an unknown deadline still has the
-posting date next to it:
+order. Each heading names the rule that matched instead of the Telegram message
+id, so an unknown deadline still has the posting date next to it:
 
 ```
-[1/395] Shegerjobs.com #18067 deadline=unknown posted=2026-11-16
+[1/395] id=17 Shegerjobs.com matched=Computer Science deadline=unknown posted=2026-11-16
+  https://t.me/shegerjobs/18067
 ```
+
+`matched=` is the rule that put the post in the list (`w:IT`, `Computer
+Science`, …); `id=` is the row id to use with `--tailor` / `--note`.
 
 | key | action |
 |---|---|

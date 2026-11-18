@@ -657,10 +657,11 @@ async def cmd_review(config: AppConfig, null_first: bool = False) -> int:
             link = row["link"]
             deep_link = telegram_deep_link(link, row["chat_id"], row["message_id"])
             posted = (row["message_date"] or "")[:10] or "unknown"
+            matched = (_row_value(row, "matched") or "").strip() or "unknown"
             mark = pipeline.badge(pipeline.entry_for(pipeline.state_key(row)))
             safe_print(
                 f"\n[{index}/{len(rows)}] id={_row_value(row, 'id', '?')} {row['chat_title']} "
-                f"#{row['message_id']} deadline={row['deadline'] or 'unknown'} "
+                f"matched={matched} deadline={row['deadline'] or 'unknown'} "
                 f"posted={posted}{mark}"
             )
             safe_print(f"  {link or deep_link or '(no link available)'}")

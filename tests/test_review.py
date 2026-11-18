@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -75,6 +77,7 @@ ROWS = [
         "chat_id": -1001,
         "chat_title": "Alpha",
         "message_id": 1,
+        "matched": "python, backend developer",
         "deadline": "2026-11-20",
         "message_date": "2026-11-10T09:00:00+00:00",
         "link": "https://t.me/alpha/1",
@@ -83,6 +86,7 @@ ROWS = [
         "chat_id": -1002,
         "chat_title": "Beta",
         "message_id": 2,
+        "matched": "w:IT",
         "deadline": "2026-11-21",
         "message_date": "2026-11-11T09:00:00+00:00",
         "link": "https://t.me/beta/2",
@@ -91,6 +95,7 @@ ROWS = [
         "chat_id": -1003,
         "chat_title": "Gamma",
         "message_id": 3,
+        "matched": None,
         "deadline": None,
         "message_date": "2026-11-12T09:00:00+00:00",
         "link": "https://t.me/gamma/3",
@@ -173,6 +178,39 @@ class ReviewFlowTests(unittest.TestCase):
 
         self.assertEqual(deleted, [])
         opened.assert_called_once_with("tg://resolve?domain=alpha&post=1")
+
+
+class ReviewLineTests(unittest.TestCase):
+    """The post heading shows the rule that matched, not the Telegram message id."""
+
+    def run_review(self, keys):
+        out = io.StringIO()
+        with (
+            patch("main.JobSaver", fake_saver(ROWS, [])),
+            patch("builtins.input", side_effect=keys),
+            patch("main.open_in_telegram", return_value=True),
+            redirect_stdout(out),
+        ):
+            asyncio.run(main.cmd_review(object()))
+        return out.getvalue()
+
+    def test_heading_shows_the_matched_rule(self):
+        printed = self.run_review(["n", "n", "q"])
+
+        self.assertIn("matched=python, backend developer", printed)
+        self.assertIn("matched=w:IT", printed)
+
+    def test_heading_no_longer_shows_the_message_id(self):
+        printed = self.run_review(["n", "n", "q"])
+
+        self.assertNotIn("#1 ", printed)
+        self.assertNotIn("#2 ", printed)
+        self.assertNotIn("#3 ", printed)
+
+    def test_heading_uses_unknown_when_no_rule_was_recorded(self):
+        printed = self.run_review(["n", "n", "q"])
+
+        self.assertIn("matched=unknown", printed)
 
 
 class ReviewOrderTests(unittest.TestCase):
