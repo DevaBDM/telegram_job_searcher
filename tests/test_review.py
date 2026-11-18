@@ -148,6 +148,20 @@ class ReviewFlowTests(unittest.TestCase):
         self.assertEqual(deleted, [(-1003, 3)])
         opened.assert_not_called()
 
+    def test_skip_and_open_keeps_the_post_and_opens_the_next(self):
+        result, deleted, opened = self.run_review(ROWS, [">", "q"])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(deleted, [])  # nothing removed from the review list
+        opened.assert_called_once_with("tg://resolve?domain=beta&post=2")
+
+    def test_skip_and_open_on_the_last_post_deletes_nothing(self):
+        result, deleted, opened = self.run_review(ROWS[-1:], [">"])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(deleted, [])
+        opened.assert_not_called()
+
     def test_d_only_deletes_and_does_not_open_the_next(self):
         _result, deleted, opened = self.run_review(ROWS, ["d", "q"])
 

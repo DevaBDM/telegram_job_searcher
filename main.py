@@ -30,7 +30,8 @@ Usage
     python main.py --review
     python main.py --review --null-first
 
-    # inside --review:  o/Enter=open  a=apply  n=next  x=delete+open  d=delete  q=quit
+    # inside --review:  o/Enter=open  a=apply  n=next  >=skip+open
+    #                   x=delete+open  d=delete  q=quit
     #                   j=note only  l=letter only  s=show text  p=paste a post
     # a asks for the FULL posting first (the Telegram post is only a teaser:
     # open its link, copy the listing, paste it, then a line with only  EOF),
@@ -671,10 +672,10 @@ async def cmd_review(config: AppConfig, null_first: bool = False) -> int:
             while True:
                 try:
                     raw = input(
-                        "o/Enter=open  a=apply  n=next  x=delete+open  d=delete  q=quit\n"
-                        "j=note only  l=letter only  s=show text  p=paste a post (multi-line)\n"
+                        "o/Enter=open  n=next  >=skip+open  x=delete+open  d=delete  q=quit\n"
+                        "a=apply  j=note only  l=letter only  s=show text  p=paste a post\n"
                         "a/l/j ask for the FULL posting: open the link, paste it, then a line with  EOF\n"
-                        "> "
+                        "review> "
                     )
                 except EOFError:
                     return 0
@@ -684,6 +685,10 @@ async def cmd_review(config: AppConfig, null_first: bool = False) -> int:
                     _open_review_post(deep_link, link)
                     continue
                 if choice == "n":
+                    break
+                if choice in (">", "n+o", "next-open"):
+                    # Skip this post untouched, but carry on in Telegram.
+                    open_next = True
                     break
                 if choice in ("x", "do", "d+o"):
                     saver.store.delete_saved(row["chat_id"], row["message_id"])
@@ -715,7 +720,7 @@ async def cmd_review(config: AppConfig, null_first: bool = False) -> int:
                     # Telegram pastes usually arrive as free text, not as "p" first.
                     paste_row(raw)
                     continue
-                safe_print("  ? enter o/Enter, a, n, x, d, q, j, l, s or p")
+                safe_print("  ? enter o/Enter, a, n, >, x, d, q, j, l, s or p")
     finally:
         await saver.disconnect()
         saver.store.close()
@@ -769,7 +774,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true", help="print matches without saving them")
     parser.add_argument("--no-save", dest="save_to_telegram", action="store_false", default=None, help="record matches locally without sending them to Saved Messages")
     parser.add_argument("--save", dest="save_to_telegram", action="store_true", help="send matches to Saved Messages (default)")
-    parser.add_argument("--review", action="store_true", help="review saved posts in deadline order; Enter/o opens the post, t tailors it, j writes the note")
+    parser.add_argument("--review", action="store_true", help="review saved posts in deadline order; Enter/o opens the post, > skips to the next one, x deletes it, a tailors it, j writes the note")
     parser.add_argument("--null-first", action="store_true", help="with --review: start with posts that have no detected deadline (oldest posted first)")
 
     agents = parser.add_argument_group(

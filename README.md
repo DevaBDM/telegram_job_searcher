@@ -374,7 +374,8 @@ posting date next to it:
 | key | action |
 |---|---|
 | `Enter` / `o` | open the current post in Telegram Desktop |
-| `n` | next post |
+| `n` | next post (nothing opened, nothing deleted) |
+| `>` | skip this post but open the next one in Telegram Desktop |
 | `x` | delete the current post and open the next one |
 | `d` | delete the current post |
 | `q` | quit |
