@@ -1,4 +1,4 @@
-"""Telegram Job Saver — watch job channels, match keywords, save to Saved Messages."""
+"""Telegram Job Saver — watch job channels, match ordered rules, save to Saved Messages."""
 
 from .console import configure_output
 

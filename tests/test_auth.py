@@ -62,7 +62,7 @@ class AuthTests(unittest.TestCase):
                     session_dir=f"{self._tmp.name}/sessions",
                 ),
                 sources=["@python_jobs"],
-                filters=FilterConfig(keywords=["python"]),
+                filters=FilterConfig(rules=["python"]),
                 saving=SavingConfig(),
                 runtime=RuntimeConfig(),
                 database=f"{self._tmp.name}/auth.sqlite3",

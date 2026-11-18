@@ -13,8 +13,9 @@ Usage
     python main.py --sources add "@hahujobs" -1001212256595
     python main.py --sources set "@hahujobs"   # replace the whole list
     python main.py --sources remove "@old"
-    python main.py --keywords                  # show the keywords
-    python main.py --keywords add "backend developer"
+    python main.py --rules                     # show the ordered matching rules
+    python main.py --rules add "backend developer"
+    python main.py --rules add "w:IT" "!internship"
 
     # scan a specific date range (overrides the stored checkpoint)
     python main.py --from "2026-11-01" --to "2026-11-16 23:59" --once
@@ -728,7 +729,7 @@ async def cmd_review(config: AppConfig, null_first: bool = False) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="main.py",
-        description="Read job channels/groups, match keywords, save matches to Saved Messages.",
+        description="Read job channels/groups, match ordered rules, save matches to Saved Messages.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "date formats: '2026-11-14', '2026-11-14 15:34:45', "
@@ -739,8 +740,9 @@ def build_parser() -> argparse.ArgumentParser:
             "  python main.py --sources add \"@hahujobs\" -1001212256595\n"
             "  python main.py --sources set \"@hahujobs\" \"@geezjobs_ethiopia\"\n"
             "  python main.py --sources list\n"
-            "  python main.py --keywords add \"backend developer\" django\n"
-            "  python main.py --keywords set python django fastapi\n"
+            "  python main.py --rules                    # list the ordered rules\n"
+            "  python main.py --rules add \"w:IT\" \"!internship\"\n"
+            "  python main.py --rules set \"Software\" \"!Marketing\"\n"
             "  python main.py --from 2026-11-01 --to 2026-11-16 --once\n"
             "  python main.py --from '2026-11-14 15:34:45' --mark-read --once\n"
             "  python main.py --from 2026-11-01 --replace-saved --once   # re-send already-saved posts\n"
@@ -842,14 +844,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--rules", nargs="*", metavar="ACTION|RULE", default=None,
         help="filters.rules: 'list' (default) | add RULE... | set RULE... | remove RULE...",
     )
-    lists.add_argument(
-        "--keywords", nargs="*", metavar="ACTION|WORD", default=None,
-        help="filters.keywords: 'list' (default) | add WORD... | set WORD... | remove WORD...",
-    )
-    lists.add_argument(
-        "--priority-keywords", nargs="*", metavar="ACTION|WORD", default=None,
-        help="filters.priority_keywords: 'list' (default) | add WORD... | set WORD... | remove WORD...",
-    )
 
     parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
     return parser
@@ -884,7 +878,7 @@ def apply_cli_overrides(config: AppConfig, args: argparse.Namespace) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Managing sources / keywords from the terminal
+# Managing sources / rules from the terminal
 # --------------------------------------------------------------------------- #
 LIST_ACTIONS = ("list", "add", "set", "remove")
 
@@ -971,7 +965,7 @@ def apply_list_action(
 
 
 def cmd_manage_lists(config_path: str, args: argparse.Namespace) -> bool:
-    """Apply --sources / --keywords actions. Returns True if anything changed."""
+    """Apply --sources / --rules actions. Returns True if anything changed."""
     jobs = []
     if args.sources is not None:
         action, items = _parse_list_action(args.sources, "sources")
@@ -979,12 +973,6 @@ def cmd_manage_lists(config_path: str, args: argparse.Namespace) -> bool:
     if args.rules is not None:
         action, items = _parse_list_action(args.rules, "rules")
         jobs.append(("rules", "filters", action, items))
-    if args.keywords is not None:
-        action, items = _parse_list_action(args.keywords, "keywords")
-        jobs.append(("keywords", "filters", action, items))
-    if args.priority_keywords is not None:
-        action, items = _parse_list_action(args.priority_keywords, "priority-keywords")
-        jobs.append(("priority_keywords", "filters", action, items))
 
     changed = False
     for key, section, action, items in jobs:
@@ -1014,14 +1002,9 @@ def main(argv: list[str] | None = None) -> int:
         print("--null-first requires --review.", file=sys.stderr)
         return 2
 
-    # --sources / --keywords / --rules edit config.yaml directly, so they run before the
+    # --sources / --rules edit config.yaml directly, so they run before the
     # file is validated (you may be building the lists from an empty state).
-    if (
-        args.sources is not None
-        or args.rules is not None
-        or args.keywords is not None
-        or args.priority_keywords is not None
-    ):
+    if args.sources is not None or args.rules is not None:
         try:
             cmd_manage_lists(args.config, args)
         except (ConfigError, ConfigFileError) as exc:

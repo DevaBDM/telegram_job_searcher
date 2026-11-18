@@ -57,15 +57,23 @@ class TelegramConfig:
 
 @dataclass
 class FilterConfig:
+    """Ordered matching rules. Index 0 has the highest priority.
+
+    Rule forms (all live in ``rules``)::
+
+        "Software Developer"      substring include
+        "!Marketing Management"   substring exclude
+        "w:IT"                    whole-word include (no fuzzy)
+        "!w:IT"                   whole-word exclude (no fuzzy)
+        "re:\\b(?:api|rest)\\b"     regular expression include (no fuzzy)
+        "!re:\\bintern\\b"          regular expression exclude (no fuzzy)
+    """
+
     rules: List[str] = field(default_factory=list)
-    keywords: List[str] = field(default_factory=list)
-    priority_keywords: List[str] = field(default_factory=list)
     must_include: List[str] = field(default_factory=list)
-    exclude: List[str] = field(default_factory=list)
     exclude_symbol: str = "!"
     case_sensitive: bool = False
-    whole_word: bool = False
-    fuzzy: bool = False          # approximate matching for plain keywords (misspelling tolerance)
+    fuzzy: bool = False          # approximate matching for plain substring rules
     fuzzy_threshold: int = 70    # 0-100, lower = more lenient (only when fuzzy is true)
 
 
@@ -305,17 +313,27 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
 
     # --- filters --------------------------------------------------------- #
     raw_filters = _section(data, "filters")
+    removed = [
+        key
+        for key in ("keywords", "priority_keywords", "exclude", "whole_word")
+        if key in raw_filters
+    ]
+    if removed:
+        raise ConfigError(
+            "These filters.* keys were removed: " + ", ".join(removed) + ".\n"
+            "Everything now lives in 'filters.rules' (index 0 = highest priority):\n"
+            "  - plain entry              → substring match\n"
+            "  - '!entry'                 → exclusion\n"
+            "  - 'w:entry' / '!w:entry'   → whole-word match, no fuzzy\n"
+            "  - 're:...' / '!re:...'     → regular expression, no fuzzy\n"
+            "Move those entries into 'filters.rules' and delete the old keys."
+        )
+
     filters = FilterConfig(
         rules=_as_list(raw_filters.get("rules"), "filters.rules"),
-        keywords=_as_list(raw_filters.get("keywords"), "filters.keywords"),
-        priority_keywords=_as_list(
-            raw_filters.get("priority_keywords"), "filters.priority_keywords"
-        ),
         must_include=_as_list(raw_filters.get("must_include"), "filters.must_include"),
-        exclude=_as_list(raw_filters.get("exclude"), "filters.exclude"),
         exclude_symbol=str(raw_filters.get("exclude_symbol") or "!"),
         case_sensitive=_as_bool(raw_filters.get("case_sensitive"), False),
-        whole_word=_as_bool(raw_filters.get("whole_word"), False),
         fuzzy=_as_bool(raw_filters.get("fuzzy"), False),
         fuzzy_threshold=_as_int(
             raw_filters.get("fuzzy_threshold"), 70, "filters.fuzzy_threshold"
@@ -326,11 +344,13 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             "filters.fuzzy_threshold must be between 0 and 100, "
             f"got {filters.fuzzy_threshold!r}."
         )
-    if not filters.rules and not filters.keywords and not filters.priority_keywords:
+    if not filters.rules:
         raise ConfigError(
-            "No 'filters.rules' or 'filters.keywords' configured — nothing would ever match. "
-            "Add at least one rule or keyword."
+            "No 'filters.rules' configured — nothing would ever match. "
+            "Add at least one rule."
         )
+    if not filters.exclude_symbol:
+        raise ConfigError("filters.exclude_symbol must not be empty.")
 
     # --- saving ---------------------------------------------------------- #
     raw_saving = _section(data, "saving")

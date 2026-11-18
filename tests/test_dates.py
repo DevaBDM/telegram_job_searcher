@@ -87,7 +87,7 @@ telegram:
   api_hash: "0123456789abcdef0123456789abcdef"
 sources: ["@python_jobs"]
 filters:
-  keywords: ["python"]
+  rules: ["python"]
 scan:
   from_date: "2026-11-01 08:00:00"
   to_date: "2026-11-16 23:59:59"

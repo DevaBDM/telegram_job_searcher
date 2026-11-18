@@ -32,8 +32,8 @@ sources:
 filters:
   case_sensitive: false
 
-  # At least ONE of these must match.
-  keywords:
+  # Ordered rules, index 0 wins.
+  rules:
     - python
     - "backend developer"
 
@@ -66,7 +66,7 @@ class ReadListTests(TempConfigTest):
     def test_reads_a_nested_list(self):
         self.write(SAMPLE)
         self.assertEqual(
-            read_list(self.path, "keywords", "filters"), ["python", "backend developer"]
+            read_list(self.path, "rules", "filters"), ["python", "backend developer"]
         )
 
     def test_missing_key_is_empty(self):
@@ -90,18 +90,18 @@ class WriteListTests(TempConfigTest):
 
         text = self.read()
         self.assertIn("# Header comment that must survive", text)
-        self.assertIn("# At least ONE of these must match.", text)
+        self.assertIn("# Ordered rules, index 0 wins.", text)
         self.assertIn("# AND logic", text)
         self.assertIn("api_hash: \"abc\"", text)
         self.assertEqual(self.parsed()["sources"], ["@hahujobs", "-1001212256595"])
-        self.assertEqual(self.parsed()["filters"]["keywords"], ["python", "backend developer"])
+        self.assertEqual(self.parsed()["filters"]["rules"], ["python", "backend developer"])
 
     def test_nested_list_is_replaced_in_place(self):
         self.write(SAMPLE)
-        write_list(self.path, "keywords", ["django", "re:\\b(?:api|rest)\\b"], "filters")
+        write_list(self.path, "rules", ["django", "re:\\b(?:api|rest)\\b"], "filters")
 
         data = self.parsed()
-        self.assertEqual(data["filters"]["keywords"], ["django", "re:\\b(?:api|rest)\\b"])
+        self.assertEqual(data["filters"]["rules"], ["django", "re:\\b(?:api|rest)\\b"])
         self.assertEqual(data["filters"]["case_sensitive"], False)
         self.assertEqual(data["sources"], ["@first_channel", "-1001234567890"])
 
@@ -126,10 +126,10 @@ class WriteListTests(TempConfigTest):
         self.assertIn("api_hash", self.read())
 
     def test_missing_nested_key_is_inserted(self):
-        text = SAMPLE.replace("  keywords:\n    - python\n    - \"backend developer\"\n", "")
+        text = SAMPLE.replace("  rules:\n    - python\n    - \"backend developer\"\n", "")
         self.write(text)
-        write_list(self.path, "keywords", ["python"], "filters")
-        self.assertEqual(self.parsed()["filters"]["keywords"], ["python"])
+        write_list(self.path, "rules", ["python"], "filters")
+        self.assertEqual(self.parsed()["filters"]["rules"], ["python"])
 
     def test_inline_flow_list_becomes_a_block(self):
         self.write(SAMPLE.replace(
@@ -152,7 +152,7 @@ class WriteListTests(TempConfigTest):
     def test_missing_section_is_an_error(self):
         self.write("telegram:\n  api_id: 1\n")
         with self.assertRaises(ConfigFileError):
-            write_list(self.path, "keywords", ["python"], "fliters")  # typo
+            write_list(self.path, "rules", ["python"], "fliters")  # typo
 
     def test_trailing_newline_is_preserved(self):
         self.write(SAMPLE)

@@ -1,4 +1,4 @@
-"""Comment-preserving edits to the ``sources`` / ``filters.keywords`` lists.
+"""Comment-preserving edits to the ``sources`` / ``filters.rules`` lists.
 
 ``config.yaml`` is hand-written and heavily commented, so ``yaml.safe_dump``
 (which throws every comment away) is not an option. Instead the file is treated

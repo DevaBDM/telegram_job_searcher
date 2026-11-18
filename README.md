@@ -1,11 +1,11 @@
 # Telegram Job Saver
 
-Watches the job channels/groups you choose, matches posts against your keywords,
+Watches the job channels/groups you choose, matches posts against your ordered rules,
 and re-sends every match to **your Saved Messages** so you can review and apply
 later — without scrolling through dozens of channels.
 
 ```
-  channels / groups  ──►  keyword filter  ──►  Saved Messages
+  channels / groups  ──►  rule filter  ──►  Saved Messages
    (config.yaml)         (include/exclude)      (review later)
 ```
 
@@ -69,37 +69,47 @@ Copy the ones you want into `config.yaml` → `sources`. `@username` also works
 for public channels; raw `-100…` ids work for private ones.
 
 You do not have to edit the file by hand — the same lists can be managed from
-the terminal (see [Managing sources & keywords](#managing-sources--keywords-from-the-terminal)).
+the terminal (see [Managing sources & rules](#managing-sources--rules-from-the-terminal)).
 
-## 5. Write your filters
+## 5. Write your rules
 
 ```yaml
 filters:
-  keywords:                 # at least ONE must match  (OR)
-    - python
-    - django
-    - "backend developer"
-  must_include: []          # ALL must match           (AND)
-  exclude:                  # if ANY matches → skipped
-    - unpaid
-    - internship
+  rules:                    # ordered: index 0 wins
+    - "lead architect"      # high-priority include
+    - "!unpaid"             # exclude
+    - "!internship"
+    - "python"              # ordinary include
+    - "django"
+    - "w:IT"                # whole word only (never fuzzy)
+  must_include: []          # ALL must match (AND)
 ```
 
-Every entry is either:
+**Position is priority.** The first matching rule decides the outcome, so a
+high-priority inclusion protects a post from a lower exclusion, and a
+high-priority exclusion beats a lower inclusion.
 
 | form | meaning | example |
 |---|---|---|
-| `python` | plain substring, case-insensitive by default | matches "Python dev" |
+| `python` | substring, case-insensitive by default | matches "Python dev" |
 | `"data engineer"` | multi-word substring | matches "Data Engineer" |
-| `'re:\bsenior\b'` | regular expression (prefix `re:`) | matches "senior" only |
+| `!internship` | exclusion (a match drops the post) | drops "unpaid internship" |
+| `w:IT` | whole word only, **never fuzzy** | matches "IT support", not "with" |
+| `!w:IT` | whole-word exclusion | drops "IT admin", keeps "edit" |
+| `'re:\bsenior\b'` | regular expression, **never fuzzy** | matches "senior" only |
+| `'!re:\bintern\b'` | regex exclusion | drops "intern", keeps "internal" |
 
-Set `whole_word: true` to make plain keywords word-bounded (`python` no longer
-matches `pythonista`), and `case_sensitive: true` if you want exact case.
+`w:` exists for short rules like `IT`. A plain substring match would hit
+"w**it**h", "pos**it**ion" and "qual**it**y"; `w:IT` only matches the standalone
+word. Both `w:` and `re:` rules are exact on purpose — fuzzy matching is skipped
+for them.
+
+Set `case_sensitive: true` if you want exact case.
 
 ### Fuzzy matching (misspelling tolerance)
 
-Set `filters.fuzzy: true` so plain keywords also match via approximate string
-matching (rapidfuzz `partial_ratio`). This catches typos like "pythn",
+Set `filters.fuzzy: true` so plain substring rules also match via approximate
+string matching (rapidfuzz `partial_ratio`). This catches typos like "pythn",
 "djang0", "backend devloper", etc.
 
 ```yaml
@@ -110,11 +120,11 @@ filters:
 
 | setting | default | meaning |
 |---|---|---|
-| `filters.fuzzy` | `false` | enable approximate keyword matching |
+| `filters.fuzzy` | `false` | enable approximate matching for substring rules |
 | `filters.fuzzy_threshold` | `70` | minimum fuzzy score (0-100) |
 
-Only plain keywords get fuzzy matching — `re:` regex patterns, `must_include`,
-and `exclude` stay exact.
+Only plain substring rules get fuzzy matching — `w:`, `re:` and `must_include`
+stay exact.
 
 
 ## 6. Test, then run
@@ -129,7 +139,7 @@ Press `Ctrl+C` to stop.
 
 ---
 
-## Managing sources & keywords from the terminal
+## Managing sources & rules from the terminal
 
 Both lists in `config.yaml` can be edited without opening the file. The commands
 write the file in place and **keep all of its comments**, then check the result
@@ -137,7 +147,7 @@ still parses before saving.
 
 ```bash
 python main.py --sources            # show what is watched (same as "list")
-python main.py --keywords           # show the current keywords
+python main.py --rules              # show the ordered rules
 ```
 
 | command | effect |
@@ -145,18 +155,18 @@ python main.py --keywords           # show the current keywords
 | `--sources add REF…` | append channels (`@name`, `-100…`, `t.me/…`); duplicates are skipped |
 | `--sources set REF…` | replace the whole watched list |
 | `--sources remove REF…` | drop exact entries |
-| `--keywords add WORD…` | append keywords |
-| `--keywords set WORD…` | replace all keywords |
-| `--keywords remove WORD…` | drop exact keywords |
+| `--rules add RULE…` | append rules at the **end** (lowest priority) |
+| `--rules set RULE…` | replace the whole rule list in the given order |
+| `--rules remove RULE…` | drop exact rules |
 
 ```bash
 python main.py --sources add "@hahujobs" -1001212256595 "https://t.me/geezjobs_ethiopia"
 python main.py --sources set "@hahujobs" "@sabijobs" "@shegarjob"
 python main.py --sources remove "@example_jobs_channel"
 
-python main.py --keywords add "backend developer" django fastapi
-python main.py --keywords set python django "backend developer"
-python main.py --keywords remove internship
+python main.py --rules add "backend developer" "w:IT" "!internship"
+python main.py --rules set "lead architect" "!unpaid" python django
+python main.py --rules remove "!internship"
 ```
 
 Notes:
@@ -165,7 +175,7 @@ Notes:
 - **In PowerShell, always quote `@username`.** A bare `@name` is parsed as
   splatting and silently dropped, so `--sources add "@hahujobs"` works but
   `--sources add @hahujobs` does nothing. `-100…` ids are fine unquoted.
-- Use quotes for anything with spaces, for regex keywords
+- Use quotes for anything with spaces, for regex rules
   (`'re:\b(?:django|fastapi)\b'`) and for `-100…` ids if your shell complains.
 - Add `--once` / `--dry-run` to the same command to scan immediately after the
   edit: `python main.py --sources add "@hahujobs" --dry-run --once`.
@@ -262,7 +272,7 @@ anything newer stays unread. `--dry-run` never changes read state.
 By default, posts already in `saved_messages` are skipped — even inside an
 explicit `--from` window — so re-running never duplicates them in Saved Messages.
 
-To force a re-send (for example, after you fixed the keywords and want the same
+To force a re-send (for example, after you fixed the rules and want the same
 window re-evaluated):
 
 ```bash
@@ -485,12 +495,11 @@ PIPELINE_PYTHON="C:\...\python.exe"
 | `telegram.api_id` / `api_hash` / `phone` | — | credentials from my.telegram.org |
 | `telegram.session_dir` | `sessions` | where the login session is stored |
 | `sources` | — | list of channels/groups (`@name`, `-100…`, `t.me/…`) — edit with `--sources add/set/remove` |
-| `filters.keywords` | — | OR list — at least one must match — edit with `--keywords add/set/remove` |
-| `filters.must_include` | `[]` | AND list — all must match |
-| `filters.exclude` | `[]` | any match → post skipped |
+| `filters.rules` | — | ordered rules, index 0 wins — edit with `--rules add/set/remove` |
+| `filters.must_include` | `[]` | AND list — all must appear literally |
+| `filters.exclude_symbol` | `!` | prefix marking an exclusion rule |
 | `filters.case_sensitive` | `false` | exact case matching |
-| `filters.whole_word` | `false` | word boundaries for plain keywords |
-| `filters.fuzzy` | `false` | approximate keyword matching (misspelling tolerance) |
+| `filters.fuzzy` | `false` | approximate matching for substring rules (misspelling tolerance) |
 | `filters.fuzzy_threshold` | `70` | minimum fuzzy score, 0-100 |
 | `saving.mode` | `auto` | `auto` / `forward` / `copy` |
 | `saving.destination` | `me` | `me` = Saved Messages |

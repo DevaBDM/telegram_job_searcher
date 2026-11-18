@@ -35,17 +35,26 @@ filters:
   case_sensitive: false
   exclude_symbol: "!"            # prefix for exclusion rules (default "!")
 
-  # Approximate keyword matching (misspelling tolerance).
+  # Approximate substring matching (misspelling tolerance).
   #   fuzzy: true        → also matches via rapidfuzz partial_ratio
   #   fuzzy_threshold: 70 → minimum score (0-100); lower = more lenient
   fuzzy: false
   fuzzy_threshold: 70
 
-  # Priority Substring Rules (Aho-Corasick automaton)
+  # Ordered matching rules (Aho-Corasick automaton).
   # Position defines priority: index 0 is highest priority.
-  # "Lowest index wins": higher-priority inclusion overrides lower-priority exclusion,
-  # and higher-priority exclusion overrides lower-priority inclusion.
-  # Prefix exclusion rules with "!" (or whatever exclude_symbol is set to).
+  # "Lowest index wins": a higher-priority inclusion overrides a lower-priority
+  # exclusion, and a higher-priority exclusion overrides a lower-priority inclusion.
+  #
+  # Forms:
+  #   "Software Developer"   substring include
+  #   "!Marketing"           substring exclude ("!" = exclude_symbol)
+  #   "w:IT"                 whole-word include — "IT" but not "with"/"position"
+  #   "!w:IT"                whole-word exclude
+  #   "re:\b(?:api|rest)\b"  regular expression (no fuzzy)
+  #   "!re:\bintern\b"       regular expression exclude (no fuzzy)
+  #
+  # fuzzy: true applies to plain substring rules only; w: and re: stay exact.
   rules:
     - "lead architect"           # index 0: INCLUDE (beats any exclusion below)
     - "!unpaid"                  # index 1: EXCLUDE
@@ -58,16 +67,12 @@ filters:
     - "backend developer"        # index 8: INCLUDE
     - "data engineer"            # index 9: INCLUDE
     - "full stack"               # index 10: INCLUDE
+    - "w:IT"                     # index 11: whole-word INCLUDE (no fuzzy)
 
   # ALL of these must appear in the post (AND logic). Leave empty to disable.
   must_include: []
   # - "ethiopia"
   # - "addis ababa"
-
-  # Legacy format fallback (used when `rules` is omitted):
-  # priority_keywords: [...]     # Immune to exclude
-  # keywords: [...]              # Subject to exclude
-  # exclude: [...]               # Excluded if no priority keyword matches
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -116,6 +121,7 @@ runtime:
   max_messages_per_poll: 100     # max new posts handled per chat per cycle
   max_age_days: 14               # ignore posts older than this (0 = no limit)
   dry_run: false                 # true = print matches but save nothing
+  replace_saved: false           # true = re-send posts already in Saved Messages (use with --from)
 
 storage:
   database: "jobsaver.sqlite3"   # remembers what was already saved (no duplicates)

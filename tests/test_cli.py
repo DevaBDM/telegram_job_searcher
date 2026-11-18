@@ -1,4 +1,4 @@
-"""Tests for `--sources` / `--keywords` list management (no Telegram, no network)."""
+"""Tests for `--sources` / `--rules` list management (no Telegram, no network)."""
 
 from __future__ import annotations
 
@@ -30,8 +30,8 @@ sources:
   - "@old_channel"
 
 filters:
-  # matched keywords
-  keywords:
+  # ordered rules
+  rules:
     - python
     - django
 """
@@ -130,30 +130,30 @@ class ManageCommandTests(unittest.TestCase):
         self.assertFalse(self.run_cli("--sources", "add", "@OLD_CHANNEL"))
         self.assertEqual(self.path.read_bytes(), before)
 
-    def test_keywords_are_managed_too(self):
-        self.assertTrue(self.run_cli("--keywords", "add", "backend developer"))
+    def test_rules_are_managed_too(self):
+        self.assertTrue(self.run_cli("--rules", "add", "backend developer"))
         self.assertEqual(
-            self.data()["filters"]["keywords"], ["python", "django", "backend developer"]
+            self.data()["filters"]["rules"], ["python", "django", "backend developer"]
         )
 
     def test_both_lists_in_one_command(self):
         self.assertTrue(
-            self.run_cli("--sources", "add", "@new", "--keywords", "set", "python")
+            self.run_cli("--sources", "add", "@new", "--rules", "set", "python")
         )
         data = self.data()
         self.assertEqual(data["sources"], ["@old_channel", "@new"])
-        self.assertEqual(data["filters"]["keywords"], ["python"])
+        self.assertEqual(data["filters"]["rules"], ["python"])
 
     def test_comments_survive(self):
         self.run_cli("--sources", "set", "@x")
         text = self.path.read_text(encoding="utf-8")
         self.assertIn("# Channels to watch", text)
-        self.assertIn("# matched keywords", text)
+        self.assertIn("# ordered rules", text)
 
     def test_read_list_sees_the_write(self):
-        self.run_cli("--keywords", "add", "fastapi")
+        self.run_cli("--rules", "add", "fastapi")
         self.assertEqual(
-            read_list(self.path, "keywords", "filters"), ["python", "django", "fastapi"]
+            read_list(self.path, "rules", "filters"), ["python", "django", "fastapi"]
         )
 
 

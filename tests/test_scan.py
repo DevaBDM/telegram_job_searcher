@@ -138,7 +138,7 @@ def build_saver(tmpdir: str, **overrides) -> JobSaver:
     saving = overrides.pop("saving", SavingConfig())
     runtime = overrides.pop("runtime", RuntimeConfig(initial_scan_limit=50, max_age_days=14))
     filters = overrides.pop(
-        "filters", FilterConfig(keywords=["python", "django"], exclude=["unpaid"])
+        "filters", FilterConfig(rules=["!unpaid", "python", "django"])
     )
     scan = overrides.pop("scan", ScanConfig())
     session = overrides.pop("session", "test")
