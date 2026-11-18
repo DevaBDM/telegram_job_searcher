@@ -130,7 +130,7 @@ stay exact.
 ## 6. Test, then run
 
 ```bash
-python main.py --dry-run --once   # shows what would be saved, saves nothing
+python main.py --dry-run --once   # print each match + its t.me link, save nothing
 python main.py --once             # one real pass
 python main.py                    # keep polling every 5 minutes
 ```

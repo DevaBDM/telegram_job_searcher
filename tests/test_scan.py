@@ -6,9 +6,11 @@ Run with:  python -m unittest discover -s tests -v
 from __future__ import annotations
 
 import asyncio
+import io
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -263,6 +265,18 @@ class ScanTests(unittest.TestCase):
         self.assertEqual(saver.client.sent, [])
         self.assertEqual(saver.store.get_last_message_id(-1001234567890), 9)
         self.assertEqual(saver.store.count_saved(), 0)
+
+    def test_dry_run_prints_the_telegram_link(self):
+        saver = self.make_saver(runtime=RuntimeConfig(dry_run=True))
+        saver.client = FakeClient([make_message(9, "python job")])
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            asyncio.run(saver.scan_chat(self.channel))
+
+        printed = out.getvalue()
+        self.assertIn("[DRY-RUN]", printed)
+        self.assertIn("https://t.me/python_jobs/9", printed)
 
     def test_append_note_mode(self):
         saver = self.make_saver(saving=SavingConfig(append_note=True))

@@ -471,6 +471,9 @@ class JobSaver:
 
             if self.cfg.runtime.dry_run:
                 safe_print(f"  · [DRY-RUN] {title} #{message.id} → {', '.join(result.keywords)}")
+                link = self.build_link(entity, message.id)
+                if link:
+                    safe_print(f"      {link}")
                 continue
 
             key = (chat_id, message.id)
