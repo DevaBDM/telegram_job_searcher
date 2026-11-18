@@ -245,8 +245,32 @@ class Store:
             cursor.execute("DELETE FROM saved_messages WHERE chat_id = ? AND message_id = ?", (chat_id, message_id))
             return cursor.rowcount > 0
 
-    def review_jobs(self) -> list[sqlite3.Row]:
-        return list(self._conn.execute("SELECT * FROM saved_messages ORDER BY CASE WHEN deadline IS NULL THEN 1 ELSE 0 END, deadline, message_date DESC, id"))
+    def review_jobs(self, null_first: bool = False) -> list[sqlite3.Row]:
+        """Saved posts in review order.
+
+        Default: soonest deadline first, posts without a deadline last (newest
+        post first inside that group).
+
+        With ``null_first``: posts without a deadline come first, ordered by
+        their posting date (oldest first), followed by the dated posts in
+        deadline order.
+        """
+        if null_first:
+            order = """
+                ORDER BY CASE WHEN deadline IS NULL THEN 0 ELSE 1 END,
+                         CASE WHEN deadline IS NULL THEN message_date END ASC,
+                         deadline,
+                         message_date DESC,
+                         id
+            """
+        else:
+            order = """
+                ORDER BY CASE WHEN deadline IS NULL THEN 1 ELSE 0 END,
+                         deadline,
+                         message_date DESC,
+                         id
+            """
+        return list(self._conn.execute("SELECT * FROM saved_messages" + order))
 
     def recent_saved(self, limit: int = 10) -> list[sqlite3.Row]:
         return list(
@@ -254,3 +278,16 @@ class Store:
                 "SELECT * FROM saved_messages ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall()
         )
+
+    def get_saved(self, row_id: int) -> Optional[sqlite3.Row]:
+        """One saved post by its database id (the id shown by --review)."""
+        return self._conn.execute(
+            "SELECT * FROM saved_messages WHERE id = ?", (row_id,)
+        ).fetchone()
+
+    def find_saved(self, chat_id: int, message_id: int) -> Optional[sqlite3.Row]:
+        """One saved post by its Telegram coordinates."""
+        return self._conn.execute(
+            "SELECT * FROM saved_messages WHERE chat_id = ? AND message_id = ?",
+            (chat_id, message_id),
+        ).fetchone()

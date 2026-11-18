@@ -59,6 +59,7 @@ DEADLINE_KEYWORDS: List[str] = [
     "Apply No Later Than",
     "Apply Until",
     "Close Date",
+    "Closes On",
     "Closing Date",
     "Closing On",
     "Cut-Off Date",
@@ -130,7 +131,9 @@ _DMY_NUM = r"(?P<d2>\d{1,2})[\-/](?P<m2>\d{1,2})[\-/](?P<y2>\d{4})"
 _MONTH_NAME = r"(?P<mn3>[A-Za-z]+)\.?,?\s+(?P<d3>\d{1,2})\s*[\s,/]\s*(?P<y3>\d{4})"
 
 # 20 Nov 2026  or  20 November, 2026  or  20/November/2026
-_DAY_MONTH_NAME = r"(?P<d4>\d{1,2})\s*[\s,/]\s*(?P<mn4>[A-Za-z]+)\.?,?\s*[\s,/]\s*(?P<y4>\d{4})"
+_DAY_MONTH_NAME = (
+    r"(?P<d4>\d{1,2})\s*[\s,/]\s*(?P<mn4>[A-Za-z]+)\.?,?\s*[\s,/]\s*(?P<y4>\d{4})"
+)
 
 # Nov 20  or  November 20  or  November, 20  (no year → assume current/next occurrence)
 _MONTH_DAY_NOYEAR = r"(?P<mn5>[A-Za-z]+)\.?,?\s+(?P<d5>\d{1,2})"

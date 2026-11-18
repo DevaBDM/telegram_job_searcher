@@ -271,7 +271,8 @@ class ScanTests(unittest.TestCase):
         asyncio.run(saver.scan_chat(self.channel))
 
         self.assertEqual(len(saver.client.sent), 1)
-        self.assertIn("matched: python, django", saver.client.sent[0][1])
+        # Only the winning (highest-priority) keyword is reported.
+        self.assertIn("matched: python", saver.client.sent[0][1])
 
     def test_cursor_never_moves_backwards(self):
         saver = self.make_saver()

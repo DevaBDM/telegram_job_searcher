@@ -324,6 +324,158 @@ saved post, so you know *why* it was kept.
 python main.py --stats
 ```
 
+### Review saved matches in deadline order
+
+`python main.py --review` walks every saved post, soonest deadline first (posts
+without a detected deadline come last). Each post is opened directly in
+Telegram Desktop through a `tg://` deep link — nothing is re-sent to Saved
+Messages during review.
+
+```bash
+python main.py --review
+
+# start with posts whose deadline could not be extracted
+python main.py --review --null-first
+```
+
+`--null-first` puts the unknown-deadline posts at the front, ordered by the date
+the job was posted (oldest first), followed by the dated posts in deadline
+order. Every review line shows both values, so an unknown deadline still has the
+posting date next to it:
+
+```
+[1/395] Shegerjobs.com #18067 deadline=unknown posted=2026-11-16
+```
+
+| key | action |
+|---|---|
+| `Enter` / `o` | open the current post in Telegram Desktop |
+| `n` | next post |
+| `x` | delete the current post and open the next one |
+| `d` | delete the current post |
+| `q` | quit |
+| `a` `l` `j` `s` `p` | apply / letter-only / job note / show text / paste a post — see [From review to a tailored CV and a job note](#from-review-to-a-tailored-cv-and-a-job-note) |
+
+If the Telegram app is not registered for `tg://` links, the post opens in your
+browser instead. `--no-save` records matches locally without sending anything
+to Saved Messages, so `--review` is the natural companion to it.
+
+---
+
+## From review to a tailored CV and a job note
+
+`--review` is also the hand-off to the two local agents that already live in the
+vault. Nothing about them is re-implemented here: this program writes the post
+text to a file and runs their normal one-shot entry points, streaming their
+output back into the review window. There is no second window to close — the
+agent runs where you are standing and the review prompt comes back on its own.
+
+```
+--review ──► a / l ──► paste the FULL posting (EOF)
+                            │
+                            ▼
+                 _pipeline/inbox/<stamp>-<slug>.md  (full text + link/channel/posted)
+                            │
+                            ▼
+            agent_tailer/run.py --posting <file>
+                  (CV + cover letter, or letter only)
+                            │
+                            ▼
+           a / r / s / n ──► agent_jobnote/run.py --posting <file>
+                  (applied, or research-only)
+```
+
+**The Telegram post is only a teaser.** The saved row holds a short summary that
+links to the real listing, and the database deliberately stores metadata only
+(no post text, no schema change, no re-saving). So the apply flow asks you to
+open the link, copy the listing, and paste it into the terminal. That pasted
+text is what both agents receive; the link, channel and posted date still come
+from the saved Telegram row.
+
+```
+a ─► paste the FULL posting (open the link), then a line with only  EOF
+      (type EOF straight away to use the short Telegram text instead)
+        │
+        ▼
+   tailor the CV + cover letter? [Y/n] ─► run agent_tailer inline, then come back
+                                        └─ n ─► straight to the next question
+        ▼
+   record it?  a = applied · r = researching · n = no record
+```
+
+| key | action |
+|---|---|
+| `a` | Apply: paste the full posting, ask whether to tailor, then ask how to record it. |
+| `l` | Same, cover letter only (`agent_tailer --letter-only`): no CV, no PDF. |
+| `j` | Write the job note for the current post without tailoring (still asks for the full text). |
+| `t` | Alias for `a` (kept from the first version of this section). |
+| `s` | Show the current post's text (first 60 lines) without leaving the review. |
+| `p` | Paste a posting that is not in the list; finish with a line containing `EOF`. Use it for a multi-line paste. |
+| *(free text)* | A long single-line paste at the prompt is treated as `p`, as long as it is longer than one command word. |
+
+Paste a multi-line listing and finish it with a line containing only `EOF`
+(`:END`, `###END` and `---END---` work too). If you paste nothing at all, the
+short Telegram text is used as a fallback and you are told so — good enough for
+a quick research note, rarely good enough for a CV.
+
+| choice | result |
+|---|---|
+| `a` | `agent_jobnote --cover-letter`: the letter that was just written is copied into the note, `status: applied`, submission date set. If no letter was tailored in this run, you are asked once before the *current* master letter is copied. |
+| `r` | Research note: the description block is filled, the letter block stays empty. |
+| `n` | Nothing is written to the vault. |
+
+If `agent_tailer` fails (model server down, unusable output, non-zero exit),
+nothing is recorded in the vault and the review simply continues.
+
+The same flow without prompts — the full text now has to come from you here as
+well, as a file or on stdin, because the saved post is only the teaser:
+
+```bash
+python main.py --pipeline-check                            # agent paths + model server status
+python main.py --tailor 42 --posting-file full-posting.txt # id= from a --review line
+python main.py --tailor 42 --posting-file -                # pipe the listing in
+python main.py --tailor 42 --posting-file - --letter-only  # letter only
+python main.py --tailor 42 --posting-file - --note-mode none  # tailer only
+python main.py --note 42 --posting-file -                  # note only
+python main.py --note 42 --posting-file - --note-mode applied # note + the current letter
+python main.py --tailor 42 --from-telegram                 # short text on purpose
+```
+
+Without `--posting-file` or `--from-telegram` these commands stop and show the
+options instead of quietly tailoring against a teaser.
+
+Files this bridge writes:
+
+| path | content |
+|---|---|
+| `_pipeline/inbox/<stamp>-<slug>.md` | the exact post text handed to both agents, plus `Posting:` / `Channel:` / `Posted:` lines |
+| `_pipeline/state.json` | which posts were tailored/noted, and whether they were marked applied |
+
+`_pipeline/` is git-ignored. The two agents keep their own artifacts and their
+own write sandboxes: `agent_tailer/out/`, `agent_jobnote/out/`, and the vault
+note itself.
+
+Both agents need `llama-server` on `http://127.0.0.1:1234/v1` (or
+`LLAMA_SERVER_URL`, which both agents and `--pipeline-check` read). The review
+list itself only needs Telegram.
+
+Running from WSL against a server started in Windows? `127.0.0.1` inside WSL is
+the Linux guest, not Windows, so point at the host instead:
+
+```bash
+export LLAMA_SERVER_URL="http://$(cat /etc/hostname).local:1234/v1"
+```
+
+`--pipeline-check` prints which endpoint it probed, so this shows up immediately.
+
+Moved a folder? Point the bridge at it instead of editing the file:
+
+```bash
+PIPELINE_TAILER_DIR="D:\...\agent_tailer"
+PIPELINE_JOBNOTE_DIR="D:\...\agent_jobnote"
+PIPELINE_PYTHON="C:\...\python.exe"
+```
+
 ---
 
 ## Configuration reference

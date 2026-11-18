@@ -1,5 +1,6 @@
 # ── secrets ────────────────────────────────────────────────────
 config.yaml
+config.yaml.*
 *.session
 *.session-journal
 sessions/
@@ -9,6 +10,7 @@ jobsaver.sqlite3
 *.sqlite3
 logs/
 chats.txt
+_pipeline/
 
 # ── python ─────────────────────────────────────────────────────
 __pycache__/
