@@ -578,6 +578,7 @@ Linux/macOS: `./run.sh`, or a `systemd --user` service / `tmux` session.
 | `Cannot resolve source '…'` | You're not a member of that chat, or the id is wrong. Run `python main.py --chats` and copy the **ID** column exactly. |
 | Nothing is saved, no errors | Run `python main.py --dry-run -v` — it prints every post it looks at and why each one was skipped (`excluded by …`, `missing:…`). Also check `max_age_days` and `initial_scan_limit`. |
 | `FloodWaitError` | The client sleeps automatically; long waits are logged. Raise `poll_interval_seconds`. |
+| `Server sent a very old message with ID … ignoring` | Telethon dropped a queued update: while `--review` sits at the prompt the update loop is blocked, and anything older than a few minutes is discarded when it resumes. History comes from `get_messages`, so nothing is missed. Hidden on the console, kept in `logs/jobsaver.log`. |
 | Forwarding fails | The channel protects its content. `mode: auto` falls back to a text copy; use `mode: copy` to always copy. |
 | Session lost / `AuthKeyUnregistered` | Delete `sessions/jobsaver.session` and run `python main.py --login` again. |
 | Want to re-check old posts | `python main.py --reset-checkpoint --once`, or give an explicit `--from` date. |

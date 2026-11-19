@@ -73,6 +73,29 @@ from jobsaver.store import Store, from_db
 # --------------------------------------------------------------------------- #
 # Logging
 # --------------------------------------------------------------------------- #
+class _DropMtProtoNoise(logging.Filter):
+    """Hide Telethon's dropped-update warnings on the console.
+
+    While --review waits at the prompt the asyncio loop is blocked, so updates
+    queue up. When it resumes, Telethon discards any that are older than a few
+    minutes ("Server sent a very old message ... ignoring"). Nothing the scanner
+    needs is lost — history is read with get_messages, not with updates — but
+    the line looks like an error. It still goes to logs/jobsaver.log.
+    """
+
+    _IGNORED_PREFIXES = (
+        "Server sent a very old message",
+        "Server sent a very new message",
+        "Server resent the older message",
+    )
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not record.name.startswith("telethon"):
+            return True
+        message = record.getMessage()
+        return not message.startswith(self._IGNORED_PREFIXES)
+
+
 def setup_logging(config: AppConfig, verbose: bool) -> None:
     log_path = Path(config.log_file).expanduser()
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -84,6 +107,7 @@ def setup_logging(config: AppConfig, verbose: bool) -> None:
     console = logging.StreamHandler(sys.stdout)
     console.setLevel(logging.DEBUG if verbose else logging.INFO)
     console.setFormatter(logging.Formatter("%(asctime)s  %(message)s", "%H:%M:%S"))
+    console.addFilter(_DropMtProtoNoise())
     root.addHandler(console)
 
     file_handler = logging.handlers.RotatingFileHandler(
