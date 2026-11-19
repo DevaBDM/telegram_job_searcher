@@ -103,14 +103,23 @@ ROWS = [
 ]
 
 
-def fake_saver(rows, deleted):
+def fake_saver(rows, deleted, archived_calls=None):
     class FakeStore:
-        def review_jobs(self, null_first=False):
+        def review_jobs(self, null_first=False, archived=False):
             return rows
 
         def delete_saved(self, chat_id, message_id):
             deleted.append((chat_id, message_id))
             return True
+
+        def archive_saved(self, chat_id, message_id, archived=True):
+            (archived_calls if archived_calls is not None else deleted).append(
+                ((chat_id, message_id), archived)
+            )
+            return True
+
+        def count_archived(self):
+            return 0
 
         def close(self):
             return None
@@ -129,52 +138,77 @@ def fake_saver(rows, deleted):
 
 
 class ReviewFlowTests(unittest.TestCase):
-    def run_review(self, rows, keys, open_result=True):
+    def run_review(self, rows, keys, open_result=True, archive=False):
         deleted = []
+        archived = []
         with (
-            patch("main.JobSaver", fake_saver(rows, deleted)),
+            patch("main.JobSaver", fake_saver(rows, deleted, archived)),
             patch("builtins.input", side_effect=keys),
             patch("main.open_in_telegram", return_value=open_result) as opened,
         ):
-            result = asyncio.run(main.cmd_review(object()))
-        return result, deleted, opened
+            result = asyncio.run(main.cmd_review(object(), archive=archive))
+        return result, deleted, opened, archived
 
     def test_x_deletes_current_and_opens_next(self):
-        result, deleted, opened = self.run_review(ROWS, ["x", "q"])
+        result, deleted, opened, _ = self.run_review(ROWS, ["x", "q"])
 
         self.assertEqual(result, 0)
         self.assertEqual(deleted, [(-1001, 1)])
         opened.assert_called_once_with("tg://resolve?domain=beta&post=2")
 
     def test_x_on_the_last_post_deletes_without_opening(self):
-        result, deleted, opened = self.run_review(ROWS[-1:], ["x"])
+        result, deleted, opened, _ = self.run_review(ROWS[-1:], ["x"])
 
         self.assertEqual(result, 0)
         self.assertEqual(deleted, [(-1003, 3)])
         opened.assert_not_called()
 
-    def test_skip_and_open_keeps_the_post_and_opens_the_next(self):
-        result, deleted, opened = self.run_review(ROWS, [">", "q"])
+    def test_n_skips_and_opens_the_next_post(self):
+        result, deleted, opened, archived = self.run_review(ROWS, ["n", "q"])
 
         self.assertEqual(result, 0)
-        self.assertEqual(deleted, [])  # nothing removed from the review list
+        self.assertEqual(deleted, [])
+        self.assertEqual(archived, [])
         opened.assert_called_once_with("tg://resolve?domain=beta&post=2")
 
-    def test_skip_and_open_on_the_last_post_deletes_nothing(self):
-        result, deleted, opened = self.run_review(ROWS[-1:], [">"])
+    def test_n_on_the_last_post_does_nothing(self):
+        result, deleted, opened, _ = self.run_review(ROWS[-1:], ["n"])
 
         self.assertEqual(result, 0)
         self.assertEqual(deleted, [])
         opened.assert_not_called()
 
+    def test_gt_is_a_plain_next(self):
+        _result, deleted, opened, _ = self.run_review(ROWS, [">", "q"])
+
+        self.assertEqual(deleted, [])
+        opened.assert_not_called()
+
+    def test_z_archives_the_post_and_opens_the_next(self):
+        result, deleted, opened, archived = self.run_review(ROWS, ["z", "q"])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(deleted, [])  # archived, not deleted
+        self.assertEqual(archived, [((-1001, 1), True)])
+        opened.assert_called_once_with("tg://resolve?domain=beta&post=2")
+
+    def test_z_in_the_archive_restores_the_post(self):
+        _result, deleted, opened, archived = self.run_review(
+            ROWS, ["z", "q"], archive=True
+        )
+
+        self.assertEqual(deleted, [])
+        self.assertEqual(archived, [((-1001, 1), False)])
+        opened.assert_called_once_with("tg://resolve?domain=beta&post=2")
+
     def test_d_only_deletes_and_does_not_open_the_next(self):
-        _result, deleted, opened = self.run_review(ROWS, ["d", "q"])
+        _result, deleted, opened, _ = self.run_review(ROWS, ["d", "q"])
 
         self.assertEqual(deleted, [(-1001, 1)])
         opened.assert_not_called()
 
     def test_enter_opens_the_current_post(self):
-        _result, deleted, opened = self.run_review(ROWS, ["", "q"])
+        _result, deleted, opened, _ = self.run_review(ROWS, ["", "q"])
 
         self.assertEqual(deleted, [])
         opened.assert_called_once_with("tg://resolve?domain=alpha&post=1")
@@ -249,6 +283,67 @@ class ReviewOrderTests(unittest.TestCase):
     def test_null_first_starts_with_unknowns_by_posted_date(self):
         # Unknown deadlines first, oldest post first, then dated posts by deadline.
         self.assertEqual(self._ids(self.store.review_jobs(null_first=True)), [4, 5, 3, 1, 2])
+
+
+class ArchiveTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.store = Store(Path(self._tmp.name) / "archive.sqlite3")
+        self.addCleanup(self.store.close)
+
+        for message_id in (1, 2, 3):
+            self.store.record_saved(
+                chat_id=-1001,
+                chat_title="Test",
+                message_id=message_id,
+                message_date="2026-11-10T09:00:00+00:00",
+                matched=["python"],
+                mode="local",
+                link=f"https://t.me/test/{message_id}",
+                deadline=None,
+            )
+
+    def _ids(self, rows):
+        return [row["message_id"] for row in rows]
+
+    def test_archived_posts_leave_the_normal_review(self):
+        self.store.archive_saved(-1001, 2)
+
+        self.assertEqual(self._ids(self.store.review_jobs()), [1, 3])
+        self.assertEqual(self._ids(self.store.review_jobs(archived=True)), [2])
+
+    def test_archive_keeps_the_row_and_its_data(self):
+        self.store.archive_saved(-1001, 2)
+
+        row = self.store.find_saved(-1001, 2)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["matched"], "python")
+        self.assertEqual(row["link"], "https://t.me/test/2")
+        self.assertTrue(row["archived_at"])
+
+    def test_restoring_puts_the_post_back(self):
+        self.store.archive_saved(-1001, 2)
+        self.store.archive_saved(-1001, 2, archived=False)
+
+        self.assertEqual(self._ids(self.store.review_jobs()), [1, 2, 3])
+        self.assertEqual(self.store.review_jobs(archived=True), [])
+        self.assertIsNone(self.store.find_saved(-1001, 2)["archived_at"])
+
+    def test_archive_view_is_most_recent_first(self):
+        self.store.archive_saved(-1001, 1)
+        self.store.archive_saved(-1001, 3)
+
+        self.assertEqual(self._ids(self.store.review_jobs(archived=True)), [3, 1])
+
+    def test_count_archived(self):
+        self.assertEqual(self.store.count_archived(), 0)
+        self.store.archive_saved(-1001, 2)
+        self.assertEqual(self.store.count_archived(), 1)
+
+    def test_archiving_an_unknown_post_changes_nothing(self):
+        self.assertFalse(self.store.archive_saved(-1001, 99))
+        self.assertEqual(self.store.count_archived(), 0)
 
 
 if __name__ == "__main__":

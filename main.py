@@ -29,10 +29,13 @@ Usage
     # review saved posts in deadline order and open them in Telegram Desktop
     python main.py --review
     python main.py --review --null-first
+    python main.py --archive                   # walk the archived posts
 
-    # inside --review:  o/Enter=open  a=apply  n=next  >=skip+open
-    #                   x=delete+open  d=delete  q=quit
-    #                   j=note only  l=letter only  s=show text  p=paste a post
+    # inside --review:  o/Enter=open  n=skip+open  >=next  x=delete+open
+    #                   d=delete  z=archive+open  q=quit
+    #                   a=apply  j=note only  l=letter only  s=show text
+    #                   p=paste a post
+    # inside --archive: z puts the post back into the normal review list
     # a asks for the FULL posting first (the Telegram post is only a teaser:
     # open its link, copy the listing, paste it, then a line with only  EOF),
     # then asks "tailor?" and "record as a(applied) r(researching) n(nothing)?"
@@ -213,6 +216,9 @@ def cmd_stats(config: AppConfig) -> None:
     with Store(config.database) as store:
         safe_print(f"Database: {store.path}")
         safe_print(f"Total saved: {store.count_saved()}")
+        archived = store.count_archived()
+        if archived:
+            safe_print(f"Archived:    {archived} (walk them with --archive)")
         rows = store.recent_saved(limit=10)
         if not rows:
             safe_print("Nothing saved yet.")
@@ -533,15 +539,32 @@ async def cmd_note(
         saver.store.close()
 
 
-async def cmd_review(config: AppConfig, null_first: bool = False) -> int:
+async def cmd_review(
+    config: AppConfig, null_first: bool = False, archive: bool = False
+) -> int:
     saver = JobSaver(config)
     try:
         await saver.connect()
-        rows = saver.store.review_jobs(null_first=null_first)
+        rows = saver.store.review_jobs(null_first=null_first, archived=archive)
         if not rows:
-            safe_print("Nothing to review — no saved posts yet.")
+            if archive:
+                safe_print("The archive is empty — press z on a post in --review to file it away.")
+            else:
+                archived = saver.store.count_archived()
+                if archived:
+                    safe_print(
+                        f"Nothing to review — all saved posts are archived "
+                        f"({archived}). Use --archive to walk them."
+                    )
+                else:
+                    safe_print("Nothing to review — no saved posts yet.")
             return 0
-        if null_first:
+        if archive:
+            safe_print(
+                f"Reviewing {len(rows)} archived post(s), most recently archived first."
+            )
+            safe_print("z puts the current post back into the normal review list.")
+        elif null_first:
             safe_print(
                 f"Reviewing {len(rows)} saved post(s) — posts without a deadline "
                 "first (oldest posted first)."
@@ -697,9 +720,10 @@ async def cmd_review(config: AppConfig, null_first: bool = False) -> int:
             while True:
                 try:
                     raw = input(
-                        "o/Enter=open  n=next  >=skip+open  x=delete+open  d=delete  q=quit\n"
-                        "a=apply  j=note only  l=letter only  s=show text  p=paste a post\n"
-                        "a/l/j ask for the FULL posting: open the link, paste it, then a line with  EOF\n"
+                        "o/Enter=open  n=skip+open  >=next  x=delete+open  d=delete  q=quit\n"
+                        "z=archive+open  a=apply  j=note only  l=letter only  s=show text\n"
+                        "p=paste a post   a/l/j ask for the FULL posting: open the link,\n"
+                        "paste it, then a line with  EOF\n"
                         "review> "
                     )
                 except EOFError:
@@ -710,14 +734,26 @@ async def cmd_review(config: AppConfig, null_first: bool = False) -> int:
                     _open_review_post(deep_link, link)
                     continue
                 if choice == "n":
-                    break
-                if choice in (">", "n+o", "next-open"):
-                    # Skip this post untouched, but carry on in Telegram.
+                    # Skip the post untouched, but carry on in Telegram.
                     open_next = True
+                    break
+                if choice == ">":
                     break
                 if choice in ("x", "do", "d+o"):
                     saver.store.delete_saved(row["chat_id"], row["message_id"])
                     safe_print("  deleted from the review list")
+                    open_next = True
+                    break
+                if choice == "z":
+                    # Archive (or restore, while walking --archive): the post
+                    # leaves this list but stays in the database.
+                    saver.store.archive_saved(
+                        row["chat_id"], row["message_id"], archived=not archive
+                    )
+                    if archive:
+                        safe_print("  restored to the review list")
+                    else:
+                        safe_print("  archived (kept — browse with --archive)")
                     open_next = True
                     break
                 if choice == "d":
@@ -745,7 +781,7 @@ async def cmd_review(config: AppConfig, null_first: bool = False) -> int:
                     # Telegram pastes usually arrive as free text, not as "p" first.
                     paste_row(raw)
                     continue
-                safe_print("  ? enter o/Enter, a, n, >, x, d, q, j, l, s or p")
+                safe_print("  ? enter o/Enter, a, n, >, x, d, z, q, j, l, s or p")
     finally:
         await saver.disconnect()
         saver.store.close()
@@ -778,6 +814,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  python main.py --from 2026-11-01 --replace-saved --once   # re-send already-saved posts\n"
             "  python main.py --review          # open saved posts in deadline order\n"
             "  python main.py --review --null-first   # start with missing deadlines\n"
+            "  python main.py --archive         # walk the archived posts (z filed them)\n"
             "  python main.py --tailor 42 --posting-file full-posting.txt\n"
             "                                     # tailor one saved post (full text you pasted)\n"
             "  python main.py --note 42 --posting-file - --note-mode applied\n"
@@ -799,7 +836,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true", help="print matches without saving them")
     parser.add_argument("--no-save", dest="save_to_telegram", action="store_false", default=None, help="record matches locally without sending them to Saved Messages")
     parser.add_argument("--save", dest="save_to_telegram", action="store_true", help="send matches to Saved Messages (default)")
-    parser.add_argument("--review", action="store_true", help="review saved posts in deadline order; Enter/o opens the post, > skips to the next one, x deletes it, a tailors it, j writes the note")
+    parser.add_argument("--review", action="store_true", help="review saved posts in deadline order; Enter/o opens the post, n skips to the next one, x deletes it, z archives it, a tailors it, j writes the note")
+    parser.add_argument("--archive", action="store_true", help="walk the archived posts instead of the normal review (z on a post archives it, z again restores it); implies --review")
     parser.add_argument("--null-first", action="store_true", help="with --review: start with posts that have no detected deadline (oldest posted first)")
 
     agents = parser.add_argument_group(
@@ -1060,7 +1098,7 @@ def main(argv: list[str] | None = None) -> int:
             f"Cleared scan progress for {cleared} chat(s). "
             "Saved-message history kept (nothing will be duplicated)."
         )
-        if not any((args.once, args.stats, args.checkpoint, args.review)):
+        if not any((args.once, args.stats, args.checkpoint, args.review, args.archive)):
             return 0
 
     try:
@@ -1095,8 +1133,10 @@ def main(argv: list[str] | None = None) -> int:
                     from_telegram=args.from_telegram,
                 )
             )
-        elif args.review:
-            asyncio.run(cmd_review(config, null_first=args.null_first))
+        elif args.review or args.archive:
+            asyncio.run(
+                cmd_review(config, null_first=args.null_first, archive=args.archive)
+            )
         else:
             return asyncio.run(cmd_run(config, once=args.once))
     except KeyboardInterrupt:

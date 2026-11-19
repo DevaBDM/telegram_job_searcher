@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS saved_messages (
     mode         TEXT,
     link         TEXT,
     deadline     TEXT,
+    archived_at  TEXT,
     saved_at     TEXT NOT NULL,
     UNIQUE (chat_id, message_id)
 );
@@ -89,6 +90,8 @@ class Store:
         }
         if "deadline" not in saved_columns:
             self._conn.execute("ALTER TABLE saved_messages ADD COLUMN deadline TEXT")
+        if "archived_at" not in saved_columns:
+            self._conn.execute("ALTER TABLE saved_messages ADD COLUMN archived_at TEXT")
 
     # ------------------------------------------------------------------ #
     def close(self) -> None:
@@ -245,7 +248,28 @@ class Store:
             cursor.execute("DELETE FROM saved_messages WHERE chat_id = ? AND message_id = ?", (chat_id, message_id))
             return cursor.rowcount > 0
 
-    def review_jobs(self, null_first: bool = False) -> list[sqlite3.Row]:
+    def archive_saved(self, chat_id: int, message_id: int, archived: bool = True) -> bool:
+        """Hide a post from the normal review flow (or bring it back).
+
+        Nothing is deleted: the row keeps its text, link and deadline, and
+        ``--archive`` lists exactly the posts archived this way.
+        """
+        with self._cursor() as cursor:
+            cursor.execute(
+                "UPDATE saved_messages SET archived_at = ? WHERE chat_id = ? AND message_id = ?",
+                (_now() if archived else None, chat_id, message_id),
+            )
+            return cursor.rowcount > 0
+
+    def count_archived(self) -> int:
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM saved_messages WHERE archived_at IS NOT NULL"
+        ).fetchone()
+        return int(row["n"]) if row else 0
+
+    def review_jobs(
+        self, null_first: bool = False, archived: bool = False
+    ) -> list[sqlite3.Row]:
         """Saved posts in review order.
 
         Default: soonest deadline first, posts without a deadline last (newest
@@ -254,8 +278,19 @@ class Store:
         With ``null_first``: posts without a deadline come first, ordered by
         their posting date (oldest first), followed by the dated posts in
         deadline order.
+
+        With ``archived``: the posts hidden from the normal flow instead, most
+        recently archived first. Archived posts never appear in the default
+        review.
         """
-        if null_first:
+        where = (
+            " WHERE archived_at IS NOT NULL"
+            if archived
+            else " WHERE archived_at IS NULL"
+        )
+        if archived:
+            order = " ORDER BY archived_at DESC, id DESC"
+        elif null_first:
             order = """
                 ORDER BY CASE WHEN deadline IS NULL THEN 0 ELSE 1 END,
                          CASE WHEN deadline IS NULL THEN message_date END ASC,
@@ -270,7 +305,9 @@ class Store:
                          message_date DESC,
                          id
             """
-        return list(self._conn.execute("SELECT * FROM saved_messages" + order))
+        return list(
+            self._conn.execute("SELECT * FROM saved_messages" + where + order)
+        )
 
     def recent_saved(self, limit: int = 10) -> list[sqlite3.Row]:
         return list(

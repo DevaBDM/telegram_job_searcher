@@ -125,11 +125,17 @@ class StateTests(TempWork):
 # --------------------------------------------------------------------------- #
 def make_saver():
     class FakeStore:
-        def review_jobs(self, null_first=False):
+        def review_jobs(self, null_first=False, archived=False):
             return ROWS
 
         def delete_saved(self, chat_id, message_id):
             return True
+
+        def archive_saved(self, chat_id, message_id, archived=True):
+            return True
+
+        def count_archived(self):
+            return 0
 
         def get_saved(self, row_id):
             return ROWS[0] if row_id == 42 else None

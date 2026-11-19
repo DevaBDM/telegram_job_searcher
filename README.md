@@ -378,8 +378,9 @@ Science`, …); `id=` is the row id to use with `--tailor` / `--note`.
 | key | action |
 |---|---|
 | `Enter` / `o` | open the current post in Telegram Desktop |
-| `n` | next post (nothing opened, nothing deleted) |
-| `>` | skip this post but open the next one in Telegram Desktop |
+| `n` | skip this post but open the next one in Telegram Desktop |
+| `>` | next post (nothing opened, nothing deleted) |
+| `z` | archive this post and open the next one |
 | `x` | delete the current post and open the next one |
 | `d` | delete the current post |
 | `q` | quit |
@@ -388,6 +389,24 @@ Science`, …); `id=` is the row id to use with `--tailor` / `--note`.
 If the Telegram app is not registered for `tg://` links, the post opens in your
 browser instead. `--no-save` records matches locally without sending anything
 to Saved Messages, so `--review` is the natural companion to it.
+
+### Archive posts you don't want in the way
+
+`z` files the current post away: it disappears from the normal review, but
+nothing is deleted — the text, link and deadline stay in the database. Archived
+posts never show up in `--review` or `--review --null-first`.
+
+```bash
+python main.py --archive         # walk the archived posts (implies --review)
+```
+
+The archive view uses the same keys and walks the most recently archived post
+first. There `z` does the opposite: it puts the post back into the normal review
+list. `python main.py --stats` shows how many posts are archived.
+
+Archive is not a second database and not a separate file — it is one column on
+`saved_messages` — so `--tailor`, `--note` and the vault notes work exactly the
+same for an archived post.
 
 ---
 
